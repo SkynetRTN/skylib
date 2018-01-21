@@ -13,6 +13,9 @@ from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.convolution import Gaussian2DKernel, Kernel2D
 from astropy.modeling.models import Gaussian2D
 import sep
+
+from skylib.extraction.centroiding import centroid_sources
+
 from ..calibration.background import estimate_background, sep_compatible
 
 
@@ -158,21 +161,20 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)
 
+    # Convert to FITS origin convention
+    sources['x'] += 1
+    sources['y'] += 1
+
+    if len(sources) and centroid:
+        # Centroid sources using the IRAF-like method
+        sources['x'], sources['y'] = centroid_sources(
+            det_img, sources['x'], sources['y'], sources['a'])
+
     sources = append_fields(
         sources, 'saturated', zeros(len(sources), int), usemask=False)
     if sat_img is not None:
         # Count saturated pixels
         for y, x in zip(*(seg_img.astype(bool) & sat_img).nonzero()):
             sources[seg_img[y, x] - 1]['saturated'] += 1
-
-    if len(sources) and centroid:
-        # Centroid sources using the windowed method
-        sources['x'], sources['y'], flags = sep.winpos(
-            det_img, sources['x'], sources['y'], sources['a'])
-        sources = sources[(flags == 0).nonzero()]
-
-    # Convert to FITS origin convention
-    sources['x'] += 1
-    sources['y'] += 1
 
     return sources, bkg, rms
