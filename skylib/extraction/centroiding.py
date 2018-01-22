@@ -46,7 +46,7 @@ def centroid_iraf(data, x, y, radius=5, tol=0.2, max_iter=10):
 
         xy = []
         for axis in (0, 1):
-            marg = box.sum(axis, dtype=float)/box.shape[axis]
+            marg = box.mean(axis)
             marg -= marg.mean()
             good = (marg > 0).nonzero()
             if not len(good[0]):
@@ -60,7 +60,7 @@ def centroid_iraf(data, x, y, radius=5, tol=0.2, max_iter=10):
 
         xc_old, yc_old = xc, yc
         xc, yc = xy
-        if abs(xc - xc_old) < tol and abs(yc - yc_old) < tol:
+        if max(abs(xc - xc_old), abs(yc - yc_old)) < tol:
             break
 
     return xc + 1, yc + 1
