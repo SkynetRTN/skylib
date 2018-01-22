@@ -7,15 +7,10 @@ ready for saving to a file or sending over the Internet.
 
 from __future__ import absolute_import, division, print_function
 
-import sys
+from io import BytesIO
+
 from numpy import asanyarray, clip, percentile, uint8
 from astropy import visualization as apy_vis
-
-if sys.version_info.major < 3:
-    # noinspection PyCompatibility
-    from cStringIO import StringIO as BytesIO
-else:
-    from io import BytesIO
 
 
 __all__ = ['get_image']
@@ -189,6 +184,7 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             cmap = 'gray'
         if cmap == 'gray':
             try:
+                # noinspection PyPackageRequirements
                 from PIL import Image as pil_image
             except ImportError:
                 pil_image = None
@@ -205,6 +201,7 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
         else:
             # Use matplotlib for non-grayscale colormaps or if PIL is not
             # available
+            # noinspection PyPackageRequirements
             from matplotlib import image as mpl_image
             if fmt.lower() == 'png':
                 # PNG images are saved upside down by matplotlib, regardless of
