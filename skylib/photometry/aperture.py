@@ -225,6 +225,12 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
         bk_mean = bk_mean/bk_area
         flux -= bk_mean*area
 
+    # Convert ADUs to electrons
+    flux *= gain
+    flux_err *= gain
+    bk_mean *= gain
+    bk_sigma *= gain
+
     sources['flux'] = flux
     sources['flag'] |= flags
 

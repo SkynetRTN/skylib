@@ -104,8 +104,8 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     :return:
         record array containing isophotal parameters for each source; see
             :func:`~sep.extract` for a list of fields
-        background map array, same shape as `img`
-        background RMS array, same shape as `img`
+        background map array (ADUs), same shape as `img`
+        background RMS array (ADUs), same shape as `img`
     :rtype: tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray)
     """
     threshold = float(threshold)
@@ -160,6 +160,11 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         filter_kernel=filter_kernel, deblend_nthresh=deblend_levels,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)
+
+    # Convert ADUs to electrons
+    if gain:
+        sources['cflux'] *= gain
+        sources['flux'] *= gain
 
     # Convert to FITS origin convention
     sources['x'] += 1
