@@ -171,7 +171,7 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     # Exclude sources that couldn't be measured
     sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
                       isfinite(sources['a']) & isfinite(sources['b']) &
-                      isfinite(sources['flux'])]
+                      isfinite(sources['theta']) & isfinite(sources['flux'])]
 
     # Convert ADUs to electrons
     if gain:
