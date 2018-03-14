@@ -7,7 +7,7 @@ source extraction functions.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import ceil, pi, zeros
+from numpy import ceil, isfinite, pi, zeros
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.convolution import Gaussian2DKernel, Kernel2D
@@ -160,6 +160,11 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         filter_kernel=filter_kernel, deblend_nthresh=deblend_levels,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)
+
+    # Exclude sources that couldn't be measured
+    sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
+                      isfinite(sources['a']) & isfinite(sources['b']) &
+                      isfinite(sources['flux'])]
 
     # Convert ADUs to electrons
     if gain:
