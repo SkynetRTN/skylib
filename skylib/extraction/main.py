@@ -161,6 +161,13 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)
 
+    sources = append_fields(
+        sources, 'saturated', zeros(len(sources), int), usemask=False)
+    if sat_img is not None:
+        # Count saturated pixels
+        for y, x in zip(*(seg_img.astype(bool) & sat_img).nonzero()):
+            sources[seg_img[y, x] - 1]['saturated'] += 1
+
     # Exclude sources that couldn't be measured
     sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
                       isfinite(sources['a']) & isfinite(sources['b']) &
@@ -179,12 +186,5 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         # Centroid sources using the IRAF-like method
         sources['x'], sources['y'] = centroid_sources(
             det_img, sources['x'], sources['y'], sources['a'])
-
-    sources = append_fields(
-        sources, 'saturated', zeros(len(sources), int), usemask=False)
-    if sat_img is not None:
-        # Count saturated pixels
-        for y, x in zip(*(seg_img.astype(bool) & sat_img).nonzero()):
-            sources[seg_img[y, x] - 1]['saturated'] += 1
 
     return sources, bkg, rms
