@@ -7,7 +7,7 @@ photometry of an image after source extraction.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import int32, isscalar, log10, ones, pi, zeros
+from numpy import clip, int32, isscalar, log10, ones, pi, zeros
 from numpy.lib.recfunctions import append_fields
 import sep
 from ..calibration.background import sep_compatible
@@ -126,8 +126,8 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
         theta = sources['theta']
-        kron_r = sep.kron_radius(
-            img, x, y, sources['a'], sources['b'], theta, 6)[0]
+        kron_r = clip(sep.kron_radius(
+            img, x, y, sources['a'], sources['b'], theta, 6.0)[0], 0.1, None)
         elongation = sources['a']/sources['b']
         r = kron_r*k
         a, b = r*elongation, r/elongation
