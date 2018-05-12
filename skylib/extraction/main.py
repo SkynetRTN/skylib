@@ -7,7 +7,7 @@ source extraction functions.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import ceil, isfinite, pi, zeros
+from numpy import ceil, isfinite, log, pi, sqrt, zeros
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.convolution import Gaussian2DKernel, Kernel2D
@@ -185,6 +185,6 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     if len(sources) and centroid:
         # Centroid sources using the IRAF-like method
         sources['x'], sources['y'] = centroid_sources(
-            det_img, sources['x'], sources['y'], sources['a'])
+            det_img, sources['x'], sources['y'], 4*sqrt(2*log(2))*sources['a'])
 
     return sources, bkg, rms
