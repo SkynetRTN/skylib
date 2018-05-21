@@ -12,7 +12,8 @@ import os.path
 import logging
 
 from numpy import (
-    argmax, array, bincount, float32, indices, int32, ma, median, zeros)
+    argmax, array, bincount, float32, indices, int32, ma, median,
+    percentile as np_percentile, zeros)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -23,14 +24,15 @@ __all__ = ['combine']
 
 
 def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
-            lo=None, hi=None):
+            percentile=50, lo=None, hi=None):
     """
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
 
     :param list[astropy.io.fits.HDUList] data: input datacube containing N FITS
         images of equal dimensions (n x m)
-    :param str mode: stacking mode: "average" (default), "sum", or "median"
+    :param str mode: stacking mode: "average" (default), "sum", "percentile",
+        or "mode"
     :param str scaling: scaling mode: None (default) - do not scale data,
         "average" - scale data to match average values, "median" - match median
         values, "mode" - match modal values
@@ -42,6 +44,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         up in all values rejected for some or even all pixels), "sigclip" -
         iteratively reject pixels below and/or above the baseline
     :param int min_keep: minimum values to keep during rejection
+    :param int percentile: for `mode`="percentile", default: 50 (median)
     :param lo:
         `rejection` = "iraf": number of lowest values to clip; default: 1
         `rejection` = "minmax": reject values below this limit; default: not set
@@ -67,8 +70,11 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     if scaling:
         if scaling == 'average':
             k = datacube.mean((1, 2))
-        elif scaling == 'median':
-            k = median(datacube, (1, 2))
+        elif scaling == 'percentile':
+            if percentile == 50:
+                k = median(datacube, (1, 2))
+            else:
+                k = np_percentile(datacube, percentile, (1, 2))
         elif scaling == 'mode':
             # Compute modal values from histograms; convert to integer and
             # assume 2 x 16-bit data range
@@ -158,8 +164,11 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         res = datacube.mean(0)
     elif mode == 'sum':
         res = datacube.sum(0)
-    elif mode == 'median':
-        res = median(datacube, 0)
+    elif mode == 'percentile':
+        if percentile == 50:
+            res = median(datacube, 0)
+        else:
+            res = np_percentile(datacube, percentile, 0)
     else:
         raise ValueError('Unknown stacking mode "{}"'.format(mode))
 
