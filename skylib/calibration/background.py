@@ -6,8 +6,8 @@ estimate_background(): extract background and noise map from an image.
 
 from __future__ import absolute_import, division, print_function
 
-import sys
 from numpy import atleast_1d, repeat, where
+from numpy.ma import MaskedArray
 import sep
 
 
@@ -68,5 +68,11 @@ def estimate_background(img, size=1/64, filter_size=3, fthresh=0.0):
     fh, fw = filter_size
     fthresh = float(fthresh)
 
-    bkg = sep.Background(img, bw=bw, bh=bh, fw=fw, fh=fh, fthresh=fthresh)
+    if isinstance(img, MaskedArray):
+        mask = img.mask
+        img = img.data
+    else:
+        mask = None
+    bkg = sep.Background(
+        img, mask=mask, bw=bw, bh=bh, fw=fw, fh=fh, fthresh=fthresh)
     return bkg.back(), bkg.rms()

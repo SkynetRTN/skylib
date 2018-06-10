@@ -83,7 +83,12 @@ def centroid_sources(data, x, y, radius=5, method='iraf'):
     """
     if method == 'win':
         data = sep_compatible(data)
-        xc, yc, flags = sep.winpos(data, x - 1, y - 1, radius)
+        if isinstance(data, numpy.ma.MaskedArray):
+            mask = data.mask
+            data = data.data
+        else:
+            mask = None
+        xc, yc, flags = sep.winpos(data, x - 1, y - 1, radius, mask=mask)
         if numpy.ndim(flags):
             bad = flags.nonzero()
             xc[bad] = x[bad] - 1

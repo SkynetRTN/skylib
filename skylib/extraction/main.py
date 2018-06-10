@@ -8,6 +8,7 @@ source extraction functions.
 from __future__ import absolute_import, division, print_function
 
 from numpy import ceil, isfinite, log, pi, sqrt, zeros
+from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.convolution import Gaussian2DKernel, Kernel2D
@@ -155,8 +156,22 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
 
     # Detect sources, obtain segmentation image to mark saturated sources
     # noinspection PyArgumentList
+    if isinstance(det_img, MaskedArray):
+        _img = det_img.data
+        _mask = det_img.mask
+    else:
+        _img = det_img
+        _mask = None
+    if isinstance(rms, MaskedArray):
+        if _mask is None:
+            _mask = rms.mask
+        else:
+            _mask |= rms.mask
+        _rms = rms.data
+    else:
+        _rms = rms
     sources, seg_img = sep.extract(
-        det_img, threshold, err=rms, minarea=min_pixels, gain=gain,
+        _img, threshold, err=_rms, mask=_mask, minarea=min_pixels,
         filter_kernel=filter_kernel, deblend_nthresh=deblend_levels,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)

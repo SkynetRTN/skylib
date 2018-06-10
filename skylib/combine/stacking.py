@@ -101,7 +101,8 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     if rejection and n < 2:
         rejection = None
     if rejection:
-        datacube = ma.masked_array(datacube, zeros(datacube.shape, bool))
+        if not isinstance(datacube, ma.MaskedArray):
+            datacube = ma.masked_array(datacube, zeros(datacube.shape, bool))
 
         if rejection == 'chauvenet':
             datacube.mask = chauvenet(datacube, min_vals=min_keep)
