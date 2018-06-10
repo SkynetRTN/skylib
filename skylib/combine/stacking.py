@@ -29,8 +29,8 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
 
-    :param list[astropy.io.fits.HDUList] data: input datacube containing N FITS
-        images of equal dimensions (n x m)
+    :param list data: input datacube containing N FITS images of equal
+        dimensions (n x m) or N tuples (data, header)
     :param str mode: stacking mode: "average" (default), "sum", "percentile",
         or "mode"
     :param str scaling: scaling mode: None (default) - do not scale data,
@@ -62,7 +62,10 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     :rtype: astropy.io.fits.HDUList
     """
     n = len(data)
-    datacube = array([f[0].data for f in data]).astype(float32)
+    if not n:
+        raise ValueError('No data to combine')
+    datacube = array([f[0].data if isinstance(f, pyfits.HDUList) else f[0]
+                      for f in data]).astype(float32)
 
     # Scale data
     if scaling and n < 2:
@@ -173,27 +176,27 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         raise ValueError('Unknown stacking mode "{}"'.format(mode))
 
     # Update FITS header, start from the first image
-    hdr = data[0][0].header.copy(strip=True)
+    headers = [f[0].header if isinstance(f, pyfits.HDUList) else f[1]
+               for f in data]
+    hdr = headers[0].copy(strip=True)
 
     exp_lengths = [
-        im[0].header['EXPTIME'] if 'EXPTIME' in im[0].header and
-        not isinstance(im[0].header['EXPTIME'], str)
-        else im[0].header['EXPOSURE'] if 'EXPOSURE' in im[0].header and
-        not isinstance(im[0].header['EXPOSURE'], str) else None
-        for im in data]
+        h['EXPTIME'] if 'EXPTIME' in h and not isinstance(h['EXPTIME'], str)
+        else h['EXPOSURE'] if 'EXPOSURE' in h and
+        not isinstance(h['EXPOSURE'], str) else None
+        for h in headers]
     have_exp_lengths = exp_lengths.count(None) < len(exp_lengths)
     if have_exp_lengths:
         exp_lengths = array(
             [float(l) if l is not None else 0.0 for l in exp_lengths])
-    t_start, t_cen, t_end = zip(*[get_fits_time(im[0].header) for im in data])
+    t_start, t_cen, t_end = zip(*[get_fits_time(h) for h in headers])
 
     hdr['FILTER'] = (','.join(
-        {im[0].header['FILTER'] for im in data if 'FILTER' in im[0].header}),
+        {h['FILTER'] for h in headers if 'FILTER' in h}),
         'Filter(s) used when taking images')
 
     hdr['OBSERVAT'] = (','.join(
-        {im[0].header['OBSERVAT']
-         for im in data if 'OBSERVAT' in im[0].header}),
+        {h['OBSERVAT'] for h in headers if 'OBSERVAT' in h}),
         'Observatory or telescope name(s)')
 
     if have_exp_lengths:
@@ -264,7 +267,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     hdr['NCOMB'] = (n, 'Number of images used in combining')
 
     for i, im in enumerate(data):
-        if im.filename():
+        if isinstance(im, pyfits.HDUList) and im.filename():
             hdr['IMGS{:04d}'.format(i)] = (
                 os.path.basename(im.filename()), 'Component filename')
 
