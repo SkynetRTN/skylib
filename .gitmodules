@@ -1,0 +1,3 @@
+[submodule "skylib/thirdparty/astrometry.net"]
+	path = skylib/thirdparty/astrometry.net
+	url = https://github.com/dstndstn/astrometry.net
