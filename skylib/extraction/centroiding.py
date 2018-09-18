@@ -1,19 +1,26 @@
 """
 Source centroiding.
 
+:func:`~centroid_iraf()`: given the initial guess, obtain a more accurate
+source centroid position using the IRAF-like method.
+
+:func:`~centroid_psf()`: given the initial guess, obtain a more accurate source
+centroid position using Gaussian PSF fitting
+
 :func:`~centroid_sources()`: given the initial guess, obtain a more accurate
-source centroid position using either SExtractor or IRAF method.
+source centroid position using SExtractor, IRAF, or PSF fitting method.
 """
 
 from __future__ import absolute_import, division, print_function
 
 import numpy
 import sep
+from scipy.optimize import leastsq
 
 from ..calibration.background import sep_compatible
 
 
-__all__ = ['centroid_iraf', 'centroid_sources']
+__all__ = ['centroid_iraf', 'centroid_psf', 'centroid_sources']
 
 
 def centroid_iraf(data, x, y, radius=5, tol=0.2, max_iter=10):
@@ -63,13 +70,76 @@ def centroid_iraf(data, x, y, radius=5, tol=0.2, max_iter=10):
         if max(abs(xc - xc_old), abs(yc - yc_old)) < tol:
             break
 
-    return xc + 1, yc + 1
+    return float(xc) + 1, float(yc) + 1
+
+
+def gauss_ellip(x, y, p):
+    x0, y0, baseline, ampl, s1, s2, theta = p
+    sn, cs = numpy.sin(theta), numpy.cos(theta)
+    a = (cs/s1)**2 + (sn/s2)**2
+    b = (sn/s1)**2 + (cs/s2)**2
+    c = 2*sn*cs*(1/s1**2 - 1/s2**2)
+    dx, dy = x - x0, y - y0
+    return baseline + ampl*numpy.exp(-0.5*(a*dx**2 + b*dy**2 + c*dx*dy))
+
+
+k_gauss = 2*numpy.sqrt(2*numpy.log(2))
+
+
+def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
+    """
+    Given the initial guess, obtain a more accurate source centroid position
+    using Gaussian PSF fitting
+
+    :param array_like data: 2D pixel data array
+    :param float x: initial guess for the source X position (1-based)
+    :param float y: initial guess for the source Y position (1-based)
+    :param float radius: centroiding radius
+    :param float ftol: relative error desired in the sum of squares (see
+        :func:`scipy.optimize.leastsq`)
+    :param float xtol: relative error desired in the approximate solution
+    :param int maxfev: maximum number of calls to the function
+
+    :return: (x, y) - a pair of centroid coordinates
+    """
+    h, w = data.shape
+    xc, yc = x - 1, y - 1
+    radius = max(radius, 3)
+    x1 = min(max(int(xc - radius + 0.5), 0), w - 1)
+    y1 = min(max(int(yc - radius + 0.5), 0), h - 1)
+    x2 = min(max(int(xc + radius + 0.5), 0), w - 1)
+    y2 = min(max(int(yc + radius + 0.5), 0), h - 1)
+    box = data[y1:y2 + 1, x1:x2 + 1]
+    x0, y0 = xc - x1, yc - y1
+    y, x = numpy.indices(box.shape)
+    circ = (x - x0)**2 + (y - y0)**2 <= radius**2
+    box = box[circ].ravel().copy()
+    if len(box) < 8:
+        # Not enough pixels within the aperture to get an overdetermined system
+        # for all 7 PSF parameters
+        return xc + 1, yc + 1
+
+    box -= box.min()
+    x, y = x[circ].ravel(), y[circ].ravel()
+
+    # Initial guess
+    ampl = box.max()
+    sigma = numpy.sqrt((box > ampl/2).sum())/k_gauss
+
+    # Keep only data within the curcle centered at (xc,yc)
+
+    # Get centroid position by least-squares fitting
+    xc, yc = leastsq(
+        lambda p: gauss_ellip(x, y, p) - box,
+        numpy.array([xc - x1, yc - y1, 0, ampl, sigma, sigma, 0]),
+        ftol=ftol, xtol=xtol, maxfev=maxfev)[0][:2] + [x1, y1] + 1
+    return float(xc), float(yc)
 
 
 def centroid_sources(data, x, y, radius=5, method='iraf'):
     """
     Given the initial guess, obtain a more accurate source centroid position(s)
-    using either SExtractor or IRAF method
+    using SExtractor, IRAF, or PSF fitting method
 
     :param array_like data: 2D pixel data array
     :param array_like x: initial guess for the source X position (1-based)
@@ -77,7 +147,8 @@ def centroid_sources(data, x, y, radius=5, method='iraf'):
     :param array_like radius: centroiding radius, either an array of the same
         shape as `x` and `y` or a scalar if using the same radius for all
         sources
-    :param str method: "iraf" (default) or "win" (windowed method, SExtractor)
+    :param str method: "iraf" (default), "win" (windowed method, SExtractor),
+        or "psf" (Gaussian PSF fitting)
 
     :return: (x, y) - a pair of centroid coordinates, same shape as input
     """
@@ -98,14 +169,11 @@ def centroid_sources(data, x, y, radius=5, method='iraf'):
             return x, y
         return xc + 1, yc + 1
 
-    if method == 'iraf':
-        x, y = zip(*[
-            centroid_iraf(data, x0, y0, r)
-            for x0, y0, r in numpy.transpose(
-                [numpy.atleast_1d(x), numpy.atleast_1d(y),
-                 numpy.full_like(numpy.atleast_1d(x), radius)])])
-        if not numpy.ndim(x):
-            x, y = x[0], y[0]
-        return x, y
-
-    raise ValueError('Unknown centroiding method "{}"'.format(method))
+    x, y = zip(*[
+        {'iraf': centroid_iraf, 'psf': centroid_psf}[method](data, x0, y0, r)
+        for x0, y0, r in numpy.transpose(
+            [numpy.atleast_1d(x), numpy.atleast_1d(y),
+             numpy.full_like(numpy.atleast_1d(x), radius)])])
+    if not numpy.ndim(x):
+        x, y = x[0], y[0]
+    return x, y
