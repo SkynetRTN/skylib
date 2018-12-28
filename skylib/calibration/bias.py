@@ -21,6 +21,10 @@ def correct_bias(img, bias):
 
     :return: None
     """
-    img[0].data -= bias[0].data
-    img[0].header['BIASCORR'] = (
-        os.path.basename(bias.filename()), 'Bias corrected')
+    for i, hdu in enumerate(img):
+        if not hdu.header.get('BIASCORR', False):
+            # Apply each bias HDU to the corresponding image HDU; use the last
+            # one if bias has less HDUs
+            hdu.data -= bias[min(i, len(bias) - 1)].data
+            hdu.header['BIASCORR'] = (
+                os.path.basename(bias.filename()), 'Bias corrected')

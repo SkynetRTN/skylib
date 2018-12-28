@@ -29,8 +29,9 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
 
-    :param list data: input datacube containing N FITS images of equal
-        dimensions (n x m) or N tuples (data, header)
+    :param list data: sequence of FITS images or tuples (data, header)
+        to combine; FITS files should have the same number of HDUs and,
+        separately for each HDU, same data dimensions
     :param str mode: stacking mode: "average" (default), "sum", "percentile",
         or "mode"
     :param str scaling: scaling mode: None (default) - do not scale data,
@@ -56,222 +57,249 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         `rejection` = "sigclip": reject values more than `hi` sigmas above the
             baseline; default: 3
 
-    :return: FITS image with data set to the (n x m) combined array and header
-        copied from one of the input images and modified to reflect the stacking
-        mode and parameters
+    :return: FITS image containing the same number of HDUs as input, with data
+        set to combined array(s) and header(s) copied from one of the input
+        images and modified to reflect the stacking mode and parameters
     :rtype: astropy.io.fits.HDUList
     """
     n = len(data)
-    if not n:
+    if not len(data):
         raise ValueError('No data to combine')
-    datacube = array([f[0].data if isinstance(f, pyfits.HDUList) else f[0]
-                      for f in data]).astype(float32)
 
-    # Scale data
-    if scaling and n < 2:
-        scaling = None
-    if scaling:
-        if scaling == 'average':
-            k = datacube.mean((1, 2))
-        elif scaling == 'percentile':
-            if percentile == 50:
-                k = median(datacube, (1, 2))
+    nhdus = None
+    for f in data:
+        if isinstance(f, pyfits.HDUList):
+            m = len(f)
+        else:
+            m = 1
+        if nhdus is None:
+            nhdus = m
+        elif m != nhdus:
+            raise ValueError('All files must have the same number of HDUs')
+
+    # Process each HDU separately
+    fits = pyfits.HDUList()
+    for hdu_no in range(nhdus):
+        datacube = array([f[hdu_no].data if isinstance(f, pyfits.HDUList)
+                          else f[0] for f in data]).astype(float32)
+
+        # Scale data
+        if scaling and n < 2:
+            scaling = None
+        if scaling:
+            if scaling == 'average':
+                k = datacube.mean((1, 2))
+            elif scaling == 'percentile':
+                if percentile == 50:
+                    k = median(datacube, (1, 2))
+                else:
+                    k = np_percentile(datacube, percentile, (1, 2))
+            elif scaling == 'mode':
+                # Compute modal values from histograms; convert to integer and
+                # assume 2 x 16-bit data range
+                min_vals = datacube.min((1, 2))
+                k = [
+                    argmax(bincount(d.ravel()))
+                    for d in (datacube - min_vals[..., None, None]).
+                    clip(0, 2*0x10000 - 1).astype(int32)] + min_vals
             else:
-                k = np_percentile(datacube, percentile, (1, 2))
-        elif scaling == 'mode':
-            # Compute modal values from histograms; convert to integer and
-            # assume 2 x 16-bit data range
-            min_vals = datacube.min((1, 2))
-            k = [
-                argmax(bincount(d.ravel()))
-                for d in (datacube - min_vals[..., None, None]).
-                clip(0, 2*0x10000 - 1).astype(int32)] + min_vals
-        else:
-            raise ValueError('Unknown scaling mode "{}"'.format(scaling))
+                raise ValueError('Unknown scaling mode "{}"'.format(scaling))
 
-        # Normalize to the first frame; keep images with zero or same average
-        # as is
-        k[(k == 0).nonzero()] = 1
-        k = k[0]/k
-        scale_needed = (k != 1).nonzero()
-        datacube[scale_needed] *= k[scale_needed][..., None, None]
+            # Normalize to the first frame; keep images with zero or same
+            # average as is
+            k[(k == 0).nonzero()] = 1
+            k = k[0]/k
+            scale_needed = (k != 1).nonzero()
+            datacube[scale_needed] *= k[scale_needed][..., None, None]
 
-    # Reject outliers
-    rej_percent = 0.0
-    if rejection and n < 2:
-        rejection = None
-    if rejection:
-        if not isinstance(datacube, ma.MaskedArray):
-            datacube = ma.masked_array(datacube, zeros(datacube.shape, bool))
+        # Reject outliers
+        rej_percent = 0.0
+        if rejection and n < 2:
+            rejection = None
+        if rejection:
+            if not isinstance(datacube, ma.MaskedArray):
+                datacube = ma.masked_array(
+                    datacube, zeros(datacube.shape, bool))
 
-        if rejection == 'chauvenet':
-            datacube.mask = chauvenet(datacube, min_vals=min_keep)
-        elif rejection == 'iraf':
-            if lo is None:
-                lo = 1
-            if hi is None:
-                hi = 1
-            if len(data) - (lo + hi) < min_keep:
-                raise ValueError(
-                    'IRAF rejection with lo={}, hi={} would keep less than '
-                    '{} values for a {}-image set'.format(lo, hi, min_keep, n))
-            if lo or hi:
-                order = datacube.argsort(0)
-                mg = indices(datacube.shape[1:])
-                for j in range(-hi, lo):
-                    datacube.mask[[order[j].ravel()] +
-                                  [i.ravel() for i in mg]] = True
-                del order, mg
-        elif rejection == 'minmax':
-            if lo is not None and hi is not None:
-                if lo > hi:
+            if rejection == 'chauvenet':
+                datacube.mask = chauvenet(datacube, min_vals=min_keep)
+            elif rejection == 'iraf':
+                if lo is None:
+                    lo = 1
+                if hi is None:
+                    hi = 1
+                if len(data) - (lo + hi) < min_keep:
                     raise ValueError(
-                        'lo={} > hi={} for minmax rejection'.format(lo, hi))
-                datacube.mask[((datacube < lo) |
-                               (datacube > hi)).nonzero()] = True
-                if datacube.mask.all(0).any():
-                    logging.warn(
-                        '%d completely masked pixels left after minmax '
-                        'rejection', datacube.mask.all(0).sum())
-        elif rejection == 'sigclip':
-            if lo is None:
-                lo = 3
-            if hi is None:
-                hi = 3
-            if lo < 0 or hi < 0:
+                        'IRAF rejection with lo={}, hi={} would keep less than '
+                        '{} values for a {}-image set'.format(
+                            lo, hi, min_keep, n))
+                if lo or hi:
+                    order = datacube.argsort(0)
+                    mg = indices(datacube.shape[1:])
+                    for j in range(-hi, lo):
+                        datacube.mask[[order[j].ravel()] +
+                                      [i.ravel() for i in mg]] = True
+                    del order, mg
+            elif rejection == 'minmax':
+                if lo is not None and hi is not None:
+                    if lo > hi:
+                        raise ValueError(
+                            'lo={} > hi={} for minmax rejection'.format(lo, hi))
+                    datacube.mask[((datacube < lo) |
+                                   (datacube > hi)).nonzero()] = True
+                    if datacube.mask.all(0).any():
+                        logging.warn(
+                            '%d completely masked pixels left after minmax '
+                            'rejection', datacube.mask.all(0).sum())
+            elif rejection == 'sigclip':
+                if lo is None:
+                    lo = 3
+                if hi is None:
+                    hi = 3
+                if lo < 0 or hi < 0:
+                    raise ValueError(
+                        'Lower and upper limits for sigma clipping must be '
+                        'positive, got lo={}, hi={}'.format(lo, hi))
+                max_rej = n - min_keep
+                while True:
+                    avg = datacube.mean(0)
+                    sigma = datacube.std(0)
+                    resid = datacube - avg
+                    outliers = (datacube.mask.sum(0) < max_rej) & \
+                        (sigma > 0) & ((resid < -lo*sigma) | (resid > hi*sigma))
+                    if not outliers.any():
+                        del avg, sigma, resid, outliers
+                        break
+                    datacube.mask[outliers.nonzero()] = True
+            else:
                 raise ValueError(
-                    'Lower and upper limits for sigma clipping must be '
-                    'positive, got lo={}, hi={}'.format(lo, hi))
-            max_rej = n - min_keep
-            while True:
-                avg = datacube.mean(0)
-                sigma = datacube.std(0)
-                resid = datacube - avg
-                outliers = (datacube.mask.sum(0) < max_rej) & (sigma > 0) & (
-                    (resid < -lo*sigma) | (resid > hi*sigma))
-                if not outliers.any():
-                    del avg, sigma, resid, outliers
-                    break
-                datacube.mask[outliers.nonzero()] = True
+                    'Unknown rejection mode "{}"'.format(rejection))
+
+            if not datacube.mask.any():
+                # Nothing was rejected
+                datacube = datacube.data
+            else:
+                # Calculate the percentage of rejected pixels
+                rej_percent = datacube.mask.sum()/datacube.size*100
+
+        # Combine data
+        if mode == 'average':
+            res = datacube.mean(0)
+        elif mode == 'sum':
+            res = datacube.sum(0)
+        elif mode == 'percentile':
+            if percentile == 50:
+                res = median(datacube, 0)
+            else:
+                res = np_percentile(datacube, percentile, 0)
         else:
-            raise ValueError('Unknown rejection mode "{}"'.format(rejection))
+            raise ValueError('Unknown stacking mode "{}"'.format(mode))
 
-        if not datacube.mask.any():
-            # Nothing was rejected
-            datacube = datacube.data
-        else:
-            # Calculate the percentage of rejected pixels
-            rej_percent = datacube.mask.sum()/datacube.size*100
+        # Update FITS header, start from the first image
+        headers = [f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
+                   for f in data]
+        hdr = headers[0].copy(strip=True)
 
-    # Combine data
-    if mode == 'average':
-        res = datacube.mean(0)
-    elif mode == 'sum':
-        res = datacube.sum(0)
-    elif mode == 'percentile':
-        if percentile == 50:
-            res = median(datacube, 0)
-        else:
-            res = np_percentile(datacube, percentile, 0)
-    else:
-        raise ValueError('Unknown stacking mode "{}"'.format(mode))
-
-    # Update FITS header, start from the first image
-    headers = [f[0].header if isinstance(f, pyfits.HDUList) else f[1]
-               for f in data]
-    hdr = headers[0].copy(strip=True)
-
-    exp_lengths = [
-        h['EXPTIME'] if 'EXPTIME' in h and not isinstance(h['EXPTIME'], str)
-        else h['EXPOSURE'] if 'EXPOSURE' in h and
-        not isinstance(h['EXPOSURE'], str) else None
-        for h in headers]
-    have_exp_lengths = exp_lengths.count(None) < len(exp_lengths)
-    if have_exp_lengths:
-        exp_lengths = array(
-            [float(l) if l is not None else 0.0 for l in exp_lengths])
-    t_start, t_cen, t_end = zip(*[get_fits_time(h) for h in headers])
-
-    hdr['FILTER'] = (','.join(
-        {h['FILTER'] for h in headers if 'FILTER' in h}),
-        'Filter(s) used when taking images')
-
-    hdr['OBSERVAT'] = (','.join(
-        {h['OBSERVAT'] for h in headers if 'OBSERVAT' in h}),
-        'Observatory or telescope name(s)')
-
-    if have_exp_lengths:
-        hdr['EXPTIME'] = hdr['EXPOSURE'] = (
-            float(exp_lengths.sum() if mode == 'sum' else exp_lengths.mean()),
-            '[s] Effective exposure time')
-
-    try:
-        hdr['DATE-OBS'] = (
-            min([t for t in t_start if t is not None]),
-            'Start time of the first exposure in stack')
-    except ValueError:
-        # No exposure start times
-        pass
-
-    if t_cen.count(None) < len(t_cen):
-        # Calculate the average center time by converting to seconds since the
-        # first exposure
-        known_epochs = (
-            array([i for i, t in enumerate(t_cen) if t is not None]),)
-        t0 = min([t for t in t_cen if t is not None])
-        epochs = array(
-            [(t - t0).total_seconds() for t in t_cen if t is not None])
+        exp_lengths = [
+            h['EXPTIME'] if 'EXPTIME' in h and not isinstance(h['EXPTIME'], str)
+            else h['EXPOSURE'] if 'EXPOSURE' in h and
+            not isinstance(h['EXPOSURE'], str) else None
+            for h in headers]
+        have_exp_lengths = exp_lengths.count(None) < len(exp_lengths)
         if have_exp_lengths:
-            total_exp = exp_lengths[known_epochs].sum()
+            exp_lengths = array(
+                [float(l) if l is not None else 0.0 for l in exp_lengths])
+        t_start, t_cen, t_end = zip(*[get_fits_time(h) for h in headers])
+
+        hdr['FILTER'] = (','.join(
+            {h['FILTER'] for h in headers if 'FILTER' in h}),
+            'Filter(s) used when taking images')
+
+        hdr['OBSERVAT'] = (','.join(
+            {h['OBSERVAT'] for h in headers if 'OBSERVAT' in h}),
+            'Observatory or telescope name(s)')
+
+        if have_exp_lengths:
+            hdr['EXPTIME'] = hdr['EXPOSURE'] = (
+                float(exp_lengths.sum() if mode == 'sum'
+                      else exp_lengths.mean()), '[s] Effective exposure time')
+
+        try:
+            hdr['DATE-OBS'] = (
+                min([t for t in t_start if t is not None]),
+                'Start time of the first exposure in stack')
+        except ValueError:
+            # No exposure start times
+            pass
+
+        if t_cen.count(None) < len(t_cen):
+            # Calculate the average center time by converting to seconds since
+            # the first exposure
+            known_epochs = (
+                array([i for i, t in enumerate(t_cen) if t is not None]),)
+            t0 = min([t for t in t_cen if t is not None])
+            epochs = array(
+                [(t - t0).total_seconds() for t in t_cen if t is not None])
+            if have_exp_lengths:
+                total_exp = exp_lengths[known_epochs].sum()
+            else:
+                total_exp = 0
+            if total_exp:
+                # Weight center times by exposure lengths if the latter are
+                # known
+                tc = (epochs*exp_lengths[known_epochs]).sum()/total_exp
+            else:
+                # Otherwise, use the average central time
+                tc = epochs.mean()
+            hdr['DATE-CEN'] = (
+                (t0 + timedelta(seconds=tc)).isoformat(),
+                'Weighted central time of image stack')
+
+        try:
+            hdr['DATE-END'] = (
+                max([t for t in t_end if t is not None]),
+                'Stop time of the last exposure in stack')
+        except ValueError:
+            # No exposure stop times
+            pass
+
+        hdr['COMBMETH'] = (mode.upper(), 'Combine method')
+
+        hdr['REJMETH'] = (
+            rejection.upper() if rejection is not None else 'NONE',
+            'Rejection method used in combining')
+        if rejection == 'iraf':
+            hdr['NLOW'] = (lo, 'Number of low pixels rejected')
+            hdr['NHIGH'] = (hi, 'Number of high pixels rejected')
+        elif rejection == 'minmax':
+            hdr['TLOW'] = (lo, 'Lower rejection threshold')
+            hdr['THIGH'] = (hi, 'Upper rejection threshold')
+        elif rejection == 'sigclip':
+            hdr['SLOW'] = (lo, 'Lower sigma used with rejection')
+            hdr['SHIGH'] = (hi, 'Upper sigma used with rejection')
+        hdr['REJPRCNT'] = (float(rej_percent), 'Percentage of rejected pixels')
+
+        hdr['SCAMETH'] = (
+            scaling.upper() if scaling is not None else 'NONE',
+            'Scale method used in combining')
+
+        hdr['WGTMETH'] = ('NONE', 'Weight method used in combining')
+
+        hdr['NCOMB'] = (n, 'Number of images used in combining')
+
+        for i, im in enumerate(data):
+            if isinstance(im, pyfits.HDUList) and im.filename():
+                hdr['IMGS{:04d}'.format(i)] = (
+                    os.path.basename(im.filename()), 'Component filename')
+
+        if isinstance(res, ma.MaskedArray):
+            res = res.data
+
+        if not len(fits):
+            hdu = pyfits.PrimaryHDU(data=res, header=hdr)
         else:
-            total_exp = 0
-        if total_exp:
-            # Weight center times by exposure lengths if the latter are known
-            tc = (epochs*exp_lengths[known_epochs]).sum()/total_exp
-        else:
-            # Otherwise, use the average central time
-            tc = epochs.mean()
-        hdr['DATE-CEN'] = (
-            (t0 + timedelta(seconds=tc)).isoformat(),
-            'Weighted central time of image stack')
+            hdu = pyfits.ImageHDU(data=res, header=hdr)
 
-    try:
-        hdr['DATE-END'] = (
-            max([t for t in t_end if t is not None]),
-            'Stop time of the last exposure in stack')
-    except ValueError:
-        # No exposure stop times
-        pass
+        fits.append(hdu)
 
-    hdr['COMBMETH'] = (mode.upper(), 'Combine method')
-
-    hdr['REJMETH'] = (
-        rejection.upper() if rejection is not None else 'NONE',
-        'Rejection method used in combining')
-    if rejection == 'iraf':
-        hdr['NLOW'] = (lo, 'Number of low pixels rejected')
-        hdr['NHIGH'] = (hi, 'Number of high pixels rejected')
-    elif rejection == 'minmax':
-        hdr['TLOW'] = (lo, 'Lower rejection threshold')
-        hdr['THIGH'] = (hi, 'Upper rejection threshold')
-    elif rejection == 'sigclip':
-        hdr['SLOW'] = (lo, 'Lower sigma used with rejection')
-        hdr['SHIGH'] = (hi, 'Upper sigma used with rejection')
-    hdr['REJPRCNT'] = (float(rej_percent), 'Percentage of rejected pixels')
-
-    hdr['SCAMETH'] = (
-        scaling.upper() if scaling is not None else 'NONE',
-        'Scale method used in combining')
-
-    hdr['WGTMETH'] = ('NONE', 'Weight method used in combining')
-
-    hdr['NCOMB'] = (n, 'Number of images used in combining')
-
-    for i, im in enumerate(data):
-        if isinstance(im, pyfits.HDUList) and im.filename():
-            hdr['IMGS{:04d}'.format(i)] = (
-                os.path.basename(im.filename()), 'Component filename')
-
-    fits = pyfits.HDUList(pyfits.PrimaryHDU(
-        data=res.data if isinstance(res, ma.MaskedArray) else res, header=hdr))
     return fits

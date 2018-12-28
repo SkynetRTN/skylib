@@ -123,8 +123,8 @@ else:
 
 setup(
     name='SkyLib',
-    version='0.1.1',
-    requires=['numpy', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep'],
+    version='0.1.2',
+    requires=['numpy', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep', 'astroscrappy'],
     packages=[
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine',
         'skylib.extraction', 'skylib.io', 'skylib.photometry',

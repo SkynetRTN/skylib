@@ -110,6 +110,8 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
     x2 = min(max(int(xc + radius + 0.5), 0), w - 1)
     y2 = min(max(int(yc + radius + 0.5), 0), h - 1)
     box = data[y1:y2 + 1, x1:x2 + 1]
+
+    # Keep only data within the circle centered at (xc,yc)
     x0, y0 = xc - x1, yc - y1
     y, x = numpy.indices(box.shape)
     circ = (x - x0)**2 + (y - y0)**2 <= radius**2
@@ -118,15 +120,12 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
         # Not enough pixels within the aperture to get an overdetermined system
         # for all 7 PSF parameters
         return xc + 1, yc + 1
-
     box -= box.min()
     x, y = x[circ].ravel(), y[circ].ravel()
 
     # Initial guess
     ampl = box.max()
     sigma = numpy.sqrt((box > ampl/2).sum())/k_gauss
-
-    # Keep only data within the curcle centered at (xc,yc)
 
     # Get centroid position by least-squares fitting
     xc, yc = leastsq(

@@ -49,15 +49,17 @@ def correct_cosmics(img, detect=False, sigclip=4.5, sigfrac=0.3, objlim=5.0,
     from numpy import uint8
     from astroscrappy import detect_cosmics
 
-    crmask, cleanarr = detect_cosmics(
-        img[0].data.astype(float), sigclip=sigclip, sigfrac=sigfrac,
-        objlim=objlim, gain=gain, readnoise=readnoise, satlevel=satlevel,
-        pssl=0.0, niter=niter, sepmed=sepmed, cleantype=cleantype,
-        fsmode=fsmode, psfmodel=psfmodel, psffwhm=psffwhm, psfsize=psfsize,
-        psfk=psfk, psfbeta=psfbeta)
-    if detect:
-        img[0].data = crmask.astype(uint8)
-        img[0].header['CRONLY'] = (True, 'cosmic ray image')
-    else:
-        img[0].data = cleanarr
-        img[0].header['CRCORR'] = (True, 'cosmics removed')
+    for i, hdu in enumerate(img):
+        if not hdu.header.get('CRCORR', False):
+            crmask, cleanarr = detect_cosmics(
+                hdu.data.astype(float), sigclip=sigclip, sigfrac=sigfrac,
+                objlim=objlim, gain=gain, readnoise=readnoise,
+                satlevel=satlevel, pssl=0.0, niter=niter, sepmed=sepmed,
+                cleantype=cleantype, fsmode=fsmode, psfmodel=psfmodel,
+                psffwhm=psffwhm, psfsize=psfsize, psfk=psfk, psfbeta=psfbeta)
+            if detect:
+                hdu.data = crmask.astype(uint8)
+                hdu.header['CRONLY'] = (True, 'cosmic ray image')
+            else:
+                hdu.data = cleanarr
+                hdu.header['CRCORR'] = (True, 'cosmics removed')

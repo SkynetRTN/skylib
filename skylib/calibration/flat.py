@@ -22,13 +22,16 @@ def correct_flat(img, flat, normalize=True):
 
     :return: None
     """
-    if normalize:
-        avg = flat[0].data.mean()
-        if not avg:
-            raise ValueError('Invalid flat image. Average count = 0')
-        data = flat[0].data/avg
-    else:
-        data = flat[0].data
-    img[0].data /= data
-    img[0].header['FLATCORR'] = (
-        os.path.basename(flat.filename()), 'Flat corrected')
+    for i, hdu in enumerate(img):
+        if not hdu.header.get('FLATCORR', False):
+            flat_hdu = flat[min(i, len(flat) - 1)]
+            if normalize:
+                avg = flat_hdu.data.mean()
+                if not avg:
+                    raise ValueError('Invalid flat image. Average count = 0')
+                data = flat_hdu.data/avg
+            else:
+                data = flat_hdu.data
+            hdu.data /= data
+            hdu.header['FLATCORR'] = (
+                os.path.basename(flat.filename()), 'Flat corrected')
