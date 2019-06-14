@@ -15,8 +15,12 @@ from scipy.ndimage import (
     find_objects, generate_binary_structure, label, map_coordinates, shift)
 from scipy.interpolate import interp1d
 import wave
+import os
 
 from ..calibration.background import estimate_background
+
+__location__ = os.path.realpath(
+    os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 
 __all__ = ['sonify_image']
@@ -75,7 +79,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
                  sampling_rate=44100, start_tone=0, num_tones=22, volume=16384,
                  noise_volume=1000, bkg_scale=1/64, threshold=1.5,
                  min_connected=5, hi_clip=99.9, noise_lo=50.0, noise_hi=99.9,
-                 bkg=None, rms=None):
+                 bkg=None, rms=None, index_sounds=False):
     """
     Transform an image to sound and write it to a WAV file
 
@@ -228,6 +232,10 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         outfile.setsampwidth(2)
         outfile.setframerate(sampling_rate)
 
+        if index_sounds:
+            si = wave.open(os.path.join(__location__, 'start.wav'), 'rb')
+            outfile.writeframes(si.readframes(si.getnframes()))
+
         for i in range(h):
             # Number of samples per the current image row; works also for
             # unevenly spaced rows (fractional samples_per_row)
@@ -250,5 +258,9 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
                 -2**15, 2**15 - 1).astype(int16).tostring())
 
             ofs += m
+
+        if index_sounds:
+            ei = wave.open(os.path.join(__location__, 'stop.wav'), 'rb')
+            outfile.writeframes(ei.readframes(ei.getnframes()))
     finally:
         outfile.close()
