@@ -7,6 +7,9 @@ to_polar(): transform image to radial or circular coordinates.
 
 from __future__ import absolute_import, division, print_function
 
+import os
+import wave
+
 from numpy import (
     arange, array, ceil, cos, indices, int16, percentile, pi, sin, sqrt, outer,
     zeros)
@@ -14,13 +17,8 @@ from numpy.random import normal
 from scipy.ndimage import (
     find_objects, generate_binary_structure, label, map_coordinates, shift)
 from scipy.interpolate import interp1d
-import wave
-import os
 
 from ..calibration.background import estimate_background
-
-__location__ = os.path.realpath(
-    os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
 
 __all__ = ['sonify_image']
@@ -110,6 +108,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         extended sources
     :param array_like rms: optional background RMS map, same shape as `img`;
         must be supplied along with `background`
+    :param bool index_sounds: enable start and stop index sounds
 
     :rtype: None
     """
@@ -232,9 +231,14 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         outfile.setsampwidth(2)
         outfile.setframerate(sampling_rate)
 
+        index_sound_dir = os.path.realpath(os.path.join(
+            os.getcwd(), os.path.dirname(__file__)))
         if index_sounds:
-            si = wave.open(os.path.join(__location__, 'start.wav'), 'rb')
-            outfile.writeframes(si.readframes(si.getnframes()))
+            si = wave.open(os.path.join(index_sound_dir, 'start.wav'), 'rb')
+            try:
+                outfile.writeframes(si.readframes(si.getnframes()))
+            finally:
+                si.close()
 
         for i in range(h):
             # Number of samples per the current image row; works also for
@@ -260,7 +264,10 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
             ofs += m
 
         if index_sounds:
-            ei = wave.open(os.path.join(__location__, 'stop.wav'), 'rb')
-            outfile.writeframes(ei.readframes(ei.getnframes()))
+            ei = wave.open(os.path.join(index_sound_dir, 'stop.wav'), 'rb')
+            try:
+                outfile.writeframes(ei.readframes(ei.getnframes()))
+            finally:
+                ei.close()
     finally:
         outfile.close()
