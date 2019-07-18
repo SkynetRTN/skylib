@@ -11,8 +11,8 @@ import os
 import wave
 
 from numpy import (
-    arange, array, ceil, cos, indices, int16, percentile, pi, sin, sqrt, outer,
-    zeros)
+    arange, array, ceil, cos, indices, int16, ma, percentile, pi, sin, sqrt,
+    outer, zeros)
 from numpy.random import normal
 from scipy.ndimage import (
     find_objects, generate_binary_structure, label, map_coordinates, shift)
@@ -142,13 +142,18 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
     # noinspection PyTypeChecker
     img = img.clip(0, percentile(img, hi_clip))
 
-    # Mask pixels not belonging to connected groups
+    # Mask pixels not belonging to connected groups; don't include masked pixels
+    if isinstance(img, ma.MaskedArray):
+        img[img.mask] = 0
+        img = img.data
     labels, n = label(img, generate_binary_structure(2, 1))
     for s in find_objects(labels, n):
         if len(labels[s].nonzero()[0]) < min_connected:
             img[s] = 0
+    # Also zero out the minimum level pixels
     try:
-        img -= img[(img > 0).nonzero()].min()
+        positive = (img > 0).nonzero()
+        img[positive] -= img[positive].min()
     except ValueError:
         # No pixels above zero
         pass
