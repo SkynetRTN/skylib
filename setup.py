@@ -121,14 +121,19 @@ else:
         ('NEED_SWAP_QSORT_R', '1'),
     ]
 
+rcrlib_ext = Extension(
+    name='skylib.util.RCRLib._RCRLib',
+    sources=glob('skylib/util/RCRLib/*.c*'),
+)
+
 setup(
     name='SkyLib',
-    version='0.1.2',
+    version='0.1.3',
     requires=['numpy', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep', 'astroscrappy'],
     packages=[
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine',
         'skylib.extraction', 'skylib.io', 'skylib.photometry',
         'skylib.sonification', 'skylib.util'],
-    ext_modules=[an_engine_ext],
+    ext_modules=[an_engine_ext, rcrlib_ext],
     scripts=['scripts/fits2wav.py'],
 )
