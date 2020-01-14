@@ -379,7 +379,7 @@ int binarySearch(bool searchUp, int minimumIndex, double toFind, std::vector<dou
 		{
 			low = midPoint;
 			high = midPoint;
-			
+
 		}
 		else if (toFind > toSearch[midPoint])
 		{
@@ -389,7 +389,7 @@ int binarySearch(bool searchUp, int minimumIndex, double toFind, std::vector<dou
 		{
 			high = midPoint;
 		}
-		
+
 	}
 	if (searchUp)
 	{
@@ -487,18 +487,18 @@ double getMedian(int trueCount, std::vector<double> &w, std::vector<double> &y)
 		if (sumCounter == 0)
 		{
 			median = y[0];
-			std::cout << median << std::endl;
+			// std::cout << median << std::endl;
 		}
 		else
 		{
 			median = y[sumCounter - 1] + (.5*totalSum - (runningSum - (w[sumCounter - 1] * .5 + w[sumCounter] * .5))) / (w[sumCounter - 1] * .5 + w[sumCounter] * .5)*(y[sumCounter] - y[sumCounter - 1]);
-			std::cout << median << std::endl;
+			// std::cout << median << std::endl;
 		}
 	}
 	else
 	{
 		median = y[0];
-		std::cout << median << std::endl;
+		// std::cout << median << std::endl;
 	}
 	return median;
 }
@@ -570,7 +570,7 @@ double getMode(int trueCount, std::vector<double> &w, std::vector<double> &y)
 				k--;
 				total = std::abs(y[k + lowerLimit] - y[i + lowerLimit]);
 
-				
+
 				if (isEqual(total,minDist))
 				{
 					finalLower = (int)(min(finalLower, i + lowerLimit));
@@ -581,7 +581,7 @@ double getMode(int trueCount, std::vector<double> &w, std::vector<double> &y)
 					minDist = total;
 					finalLower = i + lowerLimit;
 					finalUpper = k + lowerLimit;
-				}			
+				}
 			}
 			if ((sVec[i] > halfWeightSum) || isEqual(sVec[i], halfWeightSum))
 			{
@@ -594,7 +594,7 @@ double getMode(int trueCount, std::vector<double> &w, std::vector<double> &y)
 				k++;
 				total = std::abs(y[i + lowerLimit] - y[k + lowerLimit]);
 
-				
+
 				if (isEqual(total,minDist))
 				{
 					finalLower = (int)(min(finalLower, k + lowerLimit));
@@ -605,7 +605,7 @@ double getMode(int trueCount, std::vector<double> &w, std::vector<double> &y)
 					minDist = total;
 					finalLower = k + lowerLimit;
 					finalUpper = i + lowerLimit;
-				}				
+				}
 			}
 		}
 
@@ -1145,7 +1145,7 @@ std::vector<double> get2DMedian(FunctionalForm &f)
 
 	//adding the extra exception parameter values from buildModelSpace:
 	/*
-	for (int i = 0; i < f.extraParameterSpace[0].size(); i++) 
+	for (int i = 0; i < f.extraParameterSpace[0].size(); i++)
 	{
 		x.push_back(f.extraParameterSpace[0][i]);
 		y.push_back(f.extraParameterSpace[1][i]);
@@ -1289,7 +1289,7 @@ std::vector<double> get3DMode(FunctionalForm &f)
 	toRet.push_back(m);
 	toRet.push_back(xNot);
 
-	
+
 	return toRet;
 
 }
@@ -1395,7 +1395,7 @@ std::vector<double> getNDMode(FunctionalForm &f)
 
 		paramBoundIn.lowIndex = -1, paramBoundIn.highIndex = -1;
 
-		
+
 
 		halfSampleBounds.push_back(paramBound);
 
@@ -1404,7 +1404,7 @@ std::vector<double> getNDMode(FunctionalForm &f)
 
 	bool nullSet = false;
 
-	while (true) 
+	while (true)
 	{
 		int checker = 0;
 		for (int j = 0; j < f.parameterSpace.size(); j++) {
@@ -1479,8 +1479,8 @@ std::vector<double> getNDMode(FunctionalForm &f)
 			}
 		}
 	}
-	
-	for (int j = 0; j < f.parameterSpace.size(); j++) 
+
+	for (int j = 0; j < f.parameterSpace.size(); j++)
 	{
 		sort(sortedWVec[j], sortedYVec[j]);
 	}
@@ -5959,7 +5959,7 @@ std::vector<double> RCR::handleMuTechSelect()
 			line = get3DMedian(*parametricModel);
 		}
 		else
-		{ 
+		{
 			line = getNDMedian(*parametricModel);
 		}
 		break;
@@ -6085,7 +6085,7 @@ void RCR::iterativeSingleSigmaRCR(std::vector<double> &w, std::vector<double> &y
 
 		//trueY = handleMuTechSelect();
 		//mu = 0;
-		
+
 
 		if (this->muType == PARAMETRIC)
 		{
@@ -6146,7 +6146,7 @@ void RCR::iterativeSingleSigmaRCR(std::vector<double> &w, std::vector<double> &y
 		sort(trueW, diff);
 
 		stDev = handleSigmaTechSelect(trueCount, trueW, diff);
-		
+
 		sigma = stDev * nCorrect(trueCount, trueW);
 
 		diff.clear();
@@ -6185,7 +6185,7 @@ void RCR::iterativeSingleSigmaRCR(std::vector<double> &y)
 		//getMu(parametricModel);
 		//trueWHold = trueW;
 		//trueYHold = trueY;
-				
+
 		if (this->muType == PARAMETRIC)
 		{
 			parametricModel->setTrueVec(localFlags, y);
@@ -6252,7 +6252,7 @@ void RCR::iterativeSingleSigmaRCR(std::vector<double> &y)
 		else
 		{
 			stop = reject(trueCount, maxIndex, max / sigma, localFlags, y);
-		}		
+		}
 	}
 	result.flags = localFlags;
 
@@ -6498,7 +6498,7 @@ void RCR::iterativeLowerSigmaRCR(std::vector<double> &y)
 
 		nonzeroAbove = diffAbove.size() > 0;
 		nonzeroBelow = diffBelow.size() > 0;
-		
+
 		if (nonzeroBelow)
 		{
 			sort(wBelow, diffBelow);
@@ -6507,7 +6507,7 @@ void RCR::iterativeLowerSigmaRCR(std::vector<double> &y)
 		{
 			sort(wAbove, diffAbove);
 		}
-		
+
 		nCorrection = nCorrect(trueCount);
 
 		if (nonzeroAbove && nonzeroBelow)
@@ -6554,7 +6554,7 @@ void RCR::iterativeLowerSigmaRCR(std::vector<double> &y)
 	this->result.stDev = stDev;
 	this->result.stDevAbove = stDevAbove;
 	this->result.stDevBelow = stDevBelow;
-	
+
 }
 void RCR::iterativeEachSigmaRCR(std::vector<double> &w, std::vector<double> &y)
 {
@@ -6791,7 +6791,7 @@ void RCR::iterativeEachSigmaRCR(std::vector<double> &y)
 		//nCorrection = nCorrect(trueCount);
 		//sigmaBelow = handleSigmaTechSelect(trueCount, wBelow, diffBelow) * nCorrection;
 		//sigmaAbove = handleSigmaTechSelect(trueCount, wAbove, diffAbove) * nCorrection;
-	
+
 		nonzeroAbove = diffAbove.size() > 0;
 		nonzeroBelow = diffBelow.size() > 0;
 		nCorrection = nCorrect(trueCount);
@@ -7542,7 +7542,7 @@ void RCR::bulkEachSigmaRCR(std::vector<double> &y)
 
 		//sigmaBelow = handleBulkSigmaTechSelect(trueCount, wBelow, diffBelow) * nCorrection;
 		//sigmaAbove = handleBulkSigmaTechSelect(trueCount, wAbove, diffAbove) * nCorrection;
-		
+
 		nonzeroAbove = diffAbove.size() > 0;
 		nonzeroBelow = diffBelow.size() > 0;
 
