@@ -124,6 +124,7 @@ else:
 rcrlib_ext = Extension(
     name='skylib.util.RCRLib._RCRLib',
     sources=glob('skylib/util/RCRLib/*.c*'),
+    extra_compile_args=['-std=c++11'],
 )
 
 setup(
