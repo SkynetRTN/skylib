@@ -2719,7 +2719,10 @@ static swig_module_info swig_module = {swig_types, 53, 0, 0, 0, 0};
 #define SWIG_as_voidptrptr(a) ((void)SWIG_as_voidptr(*a),(void**)(a)) 
 
 
+#define SWIG_FILE_WITH_INIT 1
 #define NPY_NO_DEPRECATED_API 8
+#include <time.h>
+#include <limits.h>
 #include <numpy/arrayobject.h>
 #include "astrometry/index.h"
 #include "astrometry/starxy.h"
@@ -2730,6 +2733,29 @@ static swig_module_info swig_module = {swig_types, 53, 0, 0, 0, 0};
 #include "astrometry/tweak2.h"
 #include "astrometry/healpix.h"
 #include "astrometry/log.h"
+
+
+typedef int (*timer_callback_t)(void);
+static timer_callback_t py_timer_callback = NULL;
+
+time_t timer_callback(void* userdata) {
+    int res;
+    // Call the previously set ctypes callback holding GIL while it runs
+    if (py_timer_callback) {
+        SWIG_PYTHON_THREAD_BEGIN_BLOCK;
+        res = py_timer_callback();
+        SWIG_PYTHON_THREAD_END_BLOCK;
+    }
+    else {
+        res = INT_MAX;
+    }
+    return (time_t)res;
+}
+
+void set_timer_callback(solver_t* solver, unsigned long cbptr) {
+    py_timer_callback = (timer_callback_t)cbptr;
+    solver->timer_callback = timer_callback;
+}
 
 
 typedef double DoubleArray;
@@ -4069,6 +4095,39 @@ SWIGINTERN PyObject *_wrap_voidp_to_uintp(PyObject *SWIGUNUSEDPARM(self), PyObje
     SWIG_PYTHON_THREAD_END_ALLOW;
   }
   resultobj = SWIG_NewPointerObj(SWIG_as_voidptr(result), SWIGTYPE_p_unsigned_int, 0 |  0 );
+  return resultobj;
+fail:
+  return NULL;
+}
+
+
+SWIGINTERN PyObject *_wrap_set_timer_callback(PyObject *SWIGUNUSEDPARM(self), PyObject *args) {
+  PyObject *resultobj = 0;
+  solver_t *arg1 = (solver_t *) 0 ;
+  unsigned long arg2 ;
+  void *argp1 = 0 ;
+  int res1 = 0 ;
+  unsigned long val2 ;
+  int ecode2 = 0 ;
+  PyObject *swig_obj[2] ;
+  
+  if (!SWIG_Python_UnpackTuple(args, "set_timer_callback", 2, 2, swig_obj)) SWIG_fail;
+  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_solver_t, 0 |  0 );
+  if (!SWIG_IsOK(res1)) {
+    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "set_timer_callback" "', argument " "1"" of type '" "solver_t *""'"); 
+  }
+  arg1 = (solver_t *)(argp1);
+  ecode2 = SWIG_AsVal_unsigned_SS_long(swig_obj[1], &val2);
+  if (!SWIG_IsOK(ecode2)) {
+    SWIG_exception_fail(SWIG_ArgError(ecode2), "in method '" "set_timer_callback" "', argument " "2"" of type '" "unsigned long""'");
+  } 
+  arg2 = (unsigned long)(val2);
+  {
+    SWIG_PYTHON_THREAD_BEGIN_ALLOW;
+    set_timer_callback(arg1,arg2);
+    SWIG_PYTHON_THREAD_END_ALLOW;
+  }
+  resultobj = SWIG_Py_Void();
   return resultobj;
 fail:
   return NULL;
@@ -25746,32 +25805,6 @@ SWIGINTERN PyObject *match_struct_swiginit(PyObject *SWIGUNUSEDPARM(self), PyObj
   return SWIG_Python_InitShadowInstance(args);
 }
 
-SWIGINTERN PyObject *_wrap_matchobj_compute_overlap(PyObject *SWIGUNUSEDPARM(self), PyObject *args) {
-  PyObject *resultobj = 0;
-  MatchObj *arg1 = (MatchObj *) 0 ;
-  void *argp1 = 0 ;
-  int res1 = 0 ;
-  PyObject *swig_obj[1] ;
-  
-  if (!args) SWIG_fail;
-  swig_obj[0] = args;
-  res1 = SWIG_ConvertPtr(swig_obj[0], &argp1,SWIGTYPE_p_match_struct, 0 |  0 );
-  if (!SWIG_IsOK(res1)) {
-    SWIG_exception_fail(SWIG_ArgError(res1), "in method '" "matchobj_compute_overlap" "', argument " "1"" of type '" "MatchObj *""'"); 
-  }
-  arg1 = (MatchObj *)(argp1);
-  {
-    SWIG_PYTHON_THREAD_BEGIN_ALLOW;
-    matchobj_compute_overlap(arg1);
-    SWIG_PYTHON_THREAD_END_ALLOW;
-  }
-  resultobj = SWIG_Py_Void();
-  return resultobj;
-fail:
-  return NULL;
-}
-
-
 SWIGINTERN PyObject *_wrap_matchobj_compute_derived(PyObject *SWIGUNUSEDPARM(self), PyObject *args) {
   PyObject *resultobj = 0;
   MatchObj *arg1 = (MatchObj *) 0 ;
@@ -32157,6 +32190,7 @@ static PyMethodDef SwigMethods[] = {
 	 { "voidp_to_doublep", _wrap_voidp_to_doublep, METH_O, "voidp_to_doublep(void * x) -> double *"},
 	 { "voidp_to_intp", _wrap_voidp_to_intp, METH_O, "voidp_to_intp(void * x) -> int *"},
 	 { "voidp_to_uintp", _wrap_voidp_to_uintp, METH_O, "voidp_to_uintp(void * x) -> unsigned int *"},
+	 { "set_timer_callback", _wrap_set_timer_callback, METH_VARARGS, "set_timer_callback(solver_t solver, unsigned long cbptr)"},
 	 { "index_t_codekd_set", _wrap_index_t_codekd_set, METH_VARARGS, "index_t_codekd_set(index_t self, codetree_t * codekd)"},
 	 { "index_t_codekd_get", _wrap_index_t_codekd_get, METH_O, "index_t_codekd_get(index_t self) -> codetree_t *"},
 	 { "index_t_quads_set", _wrap_index_t_quads_set, METH_VARARGS, "index_t_quads_set(index_t self, quadfile_t * quads)"},
@@ -32731,7 +32765,6 @@ static PyMethodDef SwigMethods[] = {
 	 { "delete_match_struct", _wrap_delete_match_struct, METH_O, "delete_match_struct(match_struct self)"},
 	 { "match_struct_swigregister", match_struct_swigregister, METH_O, NULL},
 	 { "match_struct_swiginit", match_struct_swiginit, METH_VARARGS, NULL},
-	 { "matchobj_compute_overlap", _wrap_matchobj_compute_overlap, METH_O, "matchobj_compute_overlap(match_struct mo)"},
 	 { "matchobj_compute_derived", _wrap_matchobj_compute_derived, METH_O, "matchobj_compute_derived(match_struct mo)"},
 	 { "matchobj_get_index_name", _wrap_matchobj_get_index_name, METH_O, "matchobj_get_index_name(match_struct mo) -> char const *"},
 	 { "matchobj_log_hit_miss", _wrap_matchobj_log_hit_miss, METH_VARARGS, "matchobj_log_hit_miss(int nbest, int nfield, int loglevel, char const * prefix)"},

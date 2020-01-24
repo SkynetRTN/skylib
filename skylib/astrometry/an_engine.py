@@ -178,6 +178,10 @@ def voidp_to_intp(x):
 def voidp_to_uintp(x):
     r"""voidp_to_uintp(void * x) -> unsigned int *"""
     return _an_engine.voidp_to_uintp(x)
+
+def set_timer_callback(solver, cbptr):
+    r"""set_timer_callback(solver_t solver, unsigned long cbptr)"""
+    return _an_engine.set_timer_callback(solver, cbptr)
 TRUE = _an_engine.TRUE
 
 FALSE = _an_engine.FALSE
@@ -1522,10 +1526,6 @@ class match_struct(object):
 # Register match_struct in _an_engine:
 _an_engine.match_struct_swigregister(match_struct)
 
-
-def matchobj_compute_overlap(mo):
-    r"""matchobj_compute_overlap(match_struct mo)"""
-    return _an_engine.matchobj_compute_overlap(mo)
 
 def matchobj_compute_derived(mo):
     r"""matchobj_compute_derived(match_struct mo)"""
