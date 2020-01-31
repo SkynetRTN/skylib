@@ -138,7 +138,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
                     mg = indices(datacube.shape[1:])
                     for j in range(-hi, lo):
                         datacube.mask[[order[j].ravel()] +
-                                      [i.ravel() for i in mg]] = True
+                                      [tuple(i.ravel() for i in mg)]] = True
                     del order, mg
             elif rejection == 'minmax':
                 if lo is not None and hi is not None:
