@@ -35,8 +35,9 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     :param str mode: stacking mode: "average" (default), "sum", "percentile",
         or "mode"
     :param str scaling: scaling mode: None (default) - do not scale data,
-        "average" - scale data to match average values, "median" - match median
-        values, "mode" - match modal values
+        "average" - scale data to match average values, "percentile" - match
+        the given percentile (median for `percentile` = 50), "mode" - match
+        modal values
     :param str rejection: outlier rejection mode: None (default) - do not reject
         outliers, "chauvenet" - use Chauvenet robust outlier rejection,
         "iraf" - IRAF-like clipping of `lo` lowest and `hi` highest values,
