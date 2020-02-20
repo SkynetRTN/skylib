@@ -168,11 +168,11 @@ def centroid_sources(data, x, y, radius=5, method='iraf'):
             return x, y
         return xc + 1, yc + 1
 
-    x, y = zip(*[
+    x, y = tuple(zip(*[
         {'iraf': centroid_iraf, 'psf': centroid_psf}[method](data, x0, y0, r)
         for x0, y0, r in numpy.transpose(
             [numpy.atleast_1d(x), numpy.atleast_1d(y),
-             numpy.full_like(numpy.atleast_1d(x), radius)])])
+             numpy.full_like(numpy.atleast_1d(x), radius)])]))
     if not numpy.ndim(x):
         x, y = x[0], y[0]
     return x, y

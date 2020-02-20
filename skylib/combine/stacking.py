@@ -210,7 +210,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         if have_exp_lengths:
             exp_lengths = array(
                 [float(l) if l is not None else 0.0 for l in exp_lengths])
-        t_start, t_cen, t_end = zip(*[get_fits_time(h) for h in headers])
+        t_start, t_cen, t_end = tuple(zip(*[get_fits_time(h) for h in headers]))
 
         hdr['FILTER'] = (','.join(
             {h['FILTER'] for h in headers if 'FILTER' in h}),
