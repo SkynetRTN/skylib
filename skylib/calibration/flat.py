@@ -22,13 +22,27 @@ def correct_flat(img, flat, normalize=True):
 
     :return: None
     """
-    if normalize:
-        avg = flat[0].data.mean()
-        if not avg:
-            raise ValueError('Invalid flat image. Average count = 0')
-        data = flat[0].data/avg
-    else:
-        data = flat[0].data
-    img[0].data /= data
-    img[0].header['FLATCORR'] = (
-        os.path.basename(flat.filename()), 'Flat corrected')
+    for i, hdu in enumerate(img):
+        if not hdu.header.get('FLATCORR', False):
+            flat_hdu = flat[min(i, len(flat) - 1)]
+            if normalize:
+                avg = flat_hdu.data.mean()
+                if not avg:
+                    raise ValueError('Invalid flat image. Average count = 0')
+                flat_data = flat_hdu.data/avg
+            else:
+                flat_data = flat_hdu.data
+
+            (h, w), (fh, fw) = hdu.data.shape, flat_data.shape
+            if (fh, fw) != (h, w):
+                # Automatic off-chip binning?
+                hbin, vbin = fw/w, fh/h
+                if hbin % 1 or vbin % 1:
+                    raise ValueError('Flat shape mismatch')
+                hbin, vbin = int(hbin), int(vbin)
+                flat_data = flat_data.reshape(h, vbin, w, hbin).\
+                    sum(3).sum(1)/(hbin*vbin)
+
+            hdu.data /= flat_data
+            hdu.header['FLATCORR'] = (
+                os.path.basename(flat.filename()), 'Flat corrected')

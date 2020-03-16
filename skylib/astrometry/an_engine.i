@@ -1,13 +1,14 @@
 
 %module(threads="1") an_engine
+%feature("autodoc", "1");
 
 %include <typemaps.i>
 
-
-%feature("autodoc", "1");
-
 %{
+#define SWIG_FILE_WITH_INIT 1
 #define NPY_NO_DEPRECATED_API 8
+#include <time.h>
+#include <limits.h>
 #include <numpy/arrayobject.h>
 #include "astrometry/index.h"
 #include "astrometry/starxy.h"
@@ -22,6 +23,31 @@
 
 %init %{
 import_array();
+%}
+
+// Handle solver_t callbacks
+%{
+typedef int (*timer_callback_t)(void);
+static timer_callback_t py_timer_callback = NULL;
+
+time_t timer_callback(void* userdata) {
+    int res;
+    // Call the previously set ctypes callback holding GIL while it runs
+    if (py_timer_callback) {
+        SWIG_PYTHON_THREAD_BEGIN_BLOCK;
+        res = py_timer_callback();
+        SWIG_PYTHON_THREAD_END_BLOCK;
+    }
+    else {
+        res = INT_MAX;
+    }
+    return (time_t)res;
+}
+
+void set_timer_callback(solver_t* solver, unsigned long cbptr) {
+    py_timer_callback = (timer_callback_t)cbptr;
+    solver->timer_callback = timer_callback;
+}
 %}
 
 
@@ -171,7 +197,14 @@ import_array();
 }
 
 
+// Set solver_t timer_callback
+
+void set_timer_callback(solver_t* solver, unsigned long cbptr);
+
+
 // Wrap the basic engine functionality
+
+%ignore matchobj_compute_overlap; // unimplemented
 
 %define WarnUnusedResult %enddef
 %include "astrometry/an-bool.h"

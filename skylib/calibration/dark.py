@@ -22,15 +22,18 @@ def correct_dark(img, dark):
 
     :return: None
     """
-    t1, t2 = img[0].header['EXPTIME'], dark[0].header['EXPTIME']
-    if not t2:
-        raise ValueError('Invalid dark image. Exposure time = 0')
-    scale = t1/t2
-    if abs(scale - 1) > 1e-7:
-        data = dark[0].data*scale
-    else:
-        data = dark[0].data
-    img[0].data -= data
-    img[0].header['DARKCORR'] = (
-        os.path.basename(dark.filename()), 'Dark corrected')
-    img[0].header['DARKSCAL'] = (scale, 'Scale factor for dark correction')
+    for i, hdu in enumerate(img):
+        if not hdu.header.get('DARKCORR', False):
+            dark_hdu = dark[min(i, len(dark) - 1)]
+            t1, t2 = hdu.header['EXPTIME'], dark_hdu.header['EXPTIME']
+            if not t2:
+                raise ValueError('Invalid dark image. Exposure time = 0')
+            scale = t1/t2
+            if abs(scale - 1) > 1e-7:
+                data = dark_hdu.data*scale
+            else:
+                data = dark_hdu.data
+            hdu.data -= data
+            hdu.header['DARKCORR'] = (
+                os.path.basename(dark.filename()), 'Dark corrected')
+            hdu.header['DARKSCAL'] = (scale, 'Scale factor for dark correction')

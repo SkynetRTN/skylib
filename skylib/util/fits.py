@@ -9,7 +9,7 @@ from __future__ import absolute_import, division, print_function
 from datetime import datetime, timedelta
 
 
-__all__ = ['get_fits_time']
+__all__ = ['get_fits_time', 'str_to_datetime']
 
 
 def str_to_datetime(s):

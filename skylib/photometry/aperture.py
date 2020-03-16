@@ -7,8 +7,9 @@ photometry of an image after source extraction.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import int32, isscalar, log10, ones, pi, zeros
+from numpy import clip, int32, isscalar, log10, ones, pi, zeros
 from numpy.lib.recfunctions import append_fields
+from numpy.ma import MaskedArray
 import sep
 from ..calibration.background import sep_compatible
 
@@ -87,11 +88,29 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
 
     x, y = sources['x'] - 1, sources['y'] - 1
     area_img = ones(img.shape, dtype=int32)
+    if isinstance(img, MaskedArray):
+        mask = img.mask
+        img = img.data
+    else:
+        mask = None
 
     have_background = background is not None and background_rms is not None
     if have_background:
         background = sep_compatible(background)
+        if isinstance(background, MaskedArray):
+            if mask is None:
+                mask = background.mask
+            else:
+                mask |= background.mask
+            background = background.data
+
         background_rms = sep_compatible(background_rms)
+        if isinstance(background_rms, MaskedArray):
+            if mask is None:
+                mask = background_rms.mask
+            else:
+                mask |= background_rms.mask
+            background_rms = background_rms.data
 
     fixed_aper = bool(a)
     if fixed_aper:
@@ -126,8 +145,11 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
         theta = sources['theta']
-        kron_r = sep.kron_radius(
-            img, x, y, sources['a'], sources['b'], theta, 6)[0]
+        kron_r = clip(
+            sep.kron_radius(
+                img, x, y, sources['a'], sources['b'], theta, 6.0,
+                mask=mask)[0],
+            0.1, None)
         elongation = sources['a']/sources['b']
         r = kron_r*k
         a, b = r*elongation, r/elongation
@@ -138,35 +160,40 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
 
     if have_background:
         if fixed_aper and a == b:
-            bk_area = sep.sum_circle(area_img, x, y, a, subpix=0)[0]
+            bk_area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
             bk_mean, bk_sigma = sep.sum_circle(
-                background, x, y, a, subpix=0)[:2]
+                background, x, y, a, mask=mask, subpix=0)[:2]
         else:
             # noinspection PyArgumentList
-            bk_area = sep.sum_ellipse(area_img, x, y, a, b, theta, subpix=0)[0]
+            bk_area = sep.sum_ellipse(
+                area_img, x, y, a, b, theta, mask=mask, subpix=0)[0]
             # noinspection PyArgumentList
             bk_mean, bk_sigma = sep.sum_ellipse(
-                background, x, y, a, b, theta, subpix=0)[:2]
+                background, x, y, a, b, theta, mask=mask, subpix=0)[:2]
         error = background_rms
     elif fixed_aper and a_out == b_out:
-        bk_area = sep.sum_circann(area_img, x, y, a_in, a_out, subpix=0)[0]
+        bk_area = sep.sum_circann(
+            area_img, x, y, a_in, a_out, mask=mask, subpix=0)[0]
         bk_mean, bk_sigma = sep.sum_circann(
-            img, x, y, a_in, a_out, subpix=0)[:2]
+            img, x, y, a_in, a_out, mask=mask, subpix=0)[:2]
         error = bk_sigma
     else:
         bk_area = sep.sum_ellipann(
-            area_img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, subpix=0)[0]
+            area_img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, mask=mask,
+            subpix=0)[0]
         bk_mean, bk_sigma = sep.sum_ellipann(
-            img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, subpix=0)[:2]
+            img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, mask=mask,
+            subpix=0)[:2]
         error = bk_sigma
 
     if have_background:
         area = bk_area
     elif fixed_aper and a == b:
-        area = sep.sum_circle(area_img, x, y, a, subpix=0)[0]
+        area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
     else:
         # noinspection PyArgumentList
-        area = sep.sum_ellipse(area_img, x, y, a, b, theta, subpix=0)[0]
+        area = sep.sum_ellipse(
+            area_img, x, y, a, b, theta, mask=mask, subpix=0)[0]
 
     if not have_background:
         # We have a single error value per source; compute flux separately
@@ -182,24 +209,26 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
         # Fixed circular aperture
         if have_background:
             flux, flux_err, flags = sep.sum_circle(
-                img, x, y, a, err=error, gain=gain, subpix=0)
+                img, x, y, a, err=error, mask=mask, gain=gain, subpix=0)
         else:
             for i, (_x, _y, _err) in enumerate(zip(x, y, error)):
                 flux[i], flux_err[i], flags[i] = sep.sum_circle(
-                    img, _x, _y, a, err=_err, gain=gain, subpix=0)
+                    img, _x, _y, a, err=_err, mask=mask, gain=gain, subpix=0)
     else:
         # Variable or elliptic aperture
         if have_background:
             # noinspection PyArgumentList
             flux, flux_err, flags = sep.sum_ellipse(
-                img, x, y, a, b, theta, err=error, gain=gain, subpix=0)
+                img, x, y, a, b, theta, err=error, mask=mask, gain=gain,
+                subpix=0)
         else:
             if all(isscalar(item) for item in (a, b, theta)):
                 # Same aperture for all sources
                 for i, (_x, _y, _err) in enumerate(zip(x, y, error)):
                     # noinspection PyArgumentList
                     flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
-                        img, _x, _y, a, b, theta, err=_err, gain=gain, subpix=0)
+                        img, _x, _y, a, b, theta, err=_err, mask=mask,
+                        gain=gain, subpix=0)
             else:
                 # Individual aperture for each source
                 if isscalar(a):
@@ -212,8 +241,8 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
                         zip(x, y, a, b, theta, error)):
                     # noinspection PyArgumentList
                     flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
-                        img, _x, _y, _a, _b, _theta, err=_err, gain=gain,
-                        subpix=0)
+                        img, _x, _y, _a, _b, _theta, err=_err, mask=mask,
+                        gain=gain, subpix=0)
 
     # Convert background sum to mean and subtract background from fluxes
     if have_background:
@@ -224,6 +253,12 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
         # Background area equals annulus area
         bk_mean = bk_mean/bk_area
         flux -= bk_mean*area
+
+    # Convert ADUs to electrons
+    flux *= gain
+    flux_err *= gain
+    bk_mean *= gain
+    bk_sigma *= gain
 
     sources['flux'] = flux
     sources['flag'] |= flags

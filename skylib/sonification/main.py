@@ -7,14 +7,16 @@ to_polar(): transform image to radial or circular coordinates.
 
 from __future__ import absolute_import, division, print_function
 
+import os
+import wave
+
 from numpy import (
-    arange, array, ceil, cos, indices, int16, percentile, pi, sin, sqrt, outer,
-    zeros)
+    arange, array, ceil, cos, indices, int16, ma, percentile, pi, sin, sqrt,
+    outer, zeros)
 from numpy.random import normal
 from scipy.ndimage import (
     find_objects, generate_binary_structure, label, map_coordinates, shift)
 from scipy.interpolate import interp1d
-import wave
 
 from ..calibration.background import estimate_background
 
@@ -75,7 +77,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
                  sampling_rate=44100, start_tone=0, num_tones=22, volume=16384,
                  noise_volume=1000, bkg_scale=1/64, threshold=1.5,
                  min_connected=5, hi_clip=99.9, noise_lo=50.0, noise_hi=99.9,
-                 bkg=None, rms=None):
+                 bkg=None, rms=None, index_sounds=False):
     """
     Transform an image to sound and write it to a WAV file
 
@@ -106,6 +108,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         extended sources
     :param array_like rms: optional background RMS map, same shape as `img`;
         must be supplied along with `background`
+    :param bool index_sounds: enable start and stop index sounds
 
     :rtype: None
     """
@@ -139,13 +142,18 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
     # noinspection PyTypeChecker
     img = img.clip(0, percentile(img, hi_clip))
 
-    # Mask pixels not belonging to connected groups
+    # Mask pixels not belonging to connected groups; don't include masked pixels
+    if isinstance(img, ma.MaskedArray):
+        img[img.mask] = 0
+        img = img.data
     labels, n = label(img, generate_binary_structure(2, 1))
     for s in find_objects(labels, n):
         if len(labels[s].nonzero()[0]) < min_connected:
             img[s] = 0
+    # Also zero out the minimum level pixels
     try:
-        img -= img[(img > 0).nonzero()].min()
+        positive = (img > 0).nonzero()
+        img[positive] -= img[positive].min()
     except ValueError:
         # No pixels above zero
         pass
@@ -228,6 +236,15 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         outfile.setsampwidth(2)
         outfile.setframerate(sampling_rate)
 
+        index_sound_dir = os.path.realpath(os.path.join(
+            os.getcwd(), os.path.dirname(__file__)))
+        if index_sounds:
+            si = wave.open(os.path.join(index_sound_dir, 'start.wav'), 'rb')
+            try:
+                outfile.writeframes(si.readframes(si.getnframes()))
+            finally:
+                si.close()
+
         for i in range(h):
             # Number of samples per the current image row; works also for
             # unevenly spaced rows (fractional samples_per_row)
@@ -250,5 +267,12 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
                 -2**15, 2**15 - 1).astype(int16).tostring())
 
             ofs += m
+
+        if index_sounds:
+            ei = wave.open(os.path.join(index_sound_dir, 'stop.wav'), 'rb')
+            try:
+                outfile.writeframes(ei.readframes(ei.getnframes()))
+            finally:
+                ei.close()
     finally:
         outfile.close()

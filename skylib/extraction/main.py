@@ -7,12 +7,16 @@ source extraction functions.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import ceil, pi, zeros
+from numpy import ceil, isfinite, log, pi, sqrt, zeros
+from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma
 from astropy.convolution import Gaussian2DKernel, Kernel2D
 from astropy.modeling.models import Gaussian2D
 import sep
+
+from skylib.extraction.centroiding import centroid_sources
+
 from ..calibration.background import estimate_background, sep_compatible
 
 
@@ -101,8 +105,8 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     :return:
         record array containing isophotal parameters for each source; see
             :func:`~sep.extract` for a list of fields
-        background map array, same shape as `img`
-        background RMS array, same shape as `img`
+        background map array (ADUs), same shape as `img`
+        background RMS array (ADUs), same shape as `img`
     :rtype: tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray)
     """
     threshold = float(threshold)
@@ -152,8 +156,22 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
 
     # Detect sources, obtain segmentation image to mark saturated sources
     # noinspection PyArgumentList
+    if isinstance(det_img, MaskedArray):
+        _img = det_img.data
+        _mask = det_img.mask
+    else:
+        _img = det_img
+        _mask = None
+    if isinstance(rms, MaskedArray):
+        if _mask is None:
+            _mask = rms.mask
+        else:
+            _mask |= rms.mask
+        _rms = rms.data
+    else:
+        _rms = rms
     sources, seg_img = sep.extract(
-        det_img, threshold, err=rms, minarea=min_pixels, gain=gain,
+        _img, threshold, err=_rms, mask=_mask, minarea=min_pixels,
         filter_kernel=filter_kernel, deblend_nthresh=deblend_levels,
         deblend_cont=deblend_contrast if deblend else 1.0,
         clean=bool(clean), clean_param=clean, segmentation_map=True)
@@ -165,14 +183,23 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
         for y, x in zip(*(seg_img.astype(bool) & sat_img).nonzero()):
             sources[seg_img[y, x] - 1]['saturated'] += 1
 
-    if len(sources) and centroid:
-        # Centroid sources using the windowed method
-        sources['x'], sources['y'], flags = sep.winpos(
-            det_img, sources['x'], sources['y'], sources['a'])
-        sources = sources[(flags == 0).nonzero()]
+    # Exclude sources that couldn't be measured
+    sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
+                      isfinite(sources['a']) & isfinite(sources['b']) &
+                      isfinite(sources['theta']) & isfinite(sources['flux'])]
+
+    # Convert ADUs to electrons
+    if gain:
+        sources['cflux'] *= gain
+        sources['flux'] *= gain
 
     # Convert to FITS origin convention
     sources['x'] += 1
     sources['y'] += 1
+
+    if len(sources) and centroid:
+        # Centroid sources using the IRAF-like method
+        sources['x'], sources['y'] = centroid_sources(
+            det_img, sources['x'], sources['y'], 4*sqrt(2*log(2))*sources['a'])
 
     return sources, bkg, rms
