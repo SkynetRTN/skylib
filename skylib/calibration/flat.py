@@ -36,12 +36,9 @@ def correct_flat(img, flat, normalize=True):
             (h, w), (fh, fw) = hdu.data.shape, flat_data.shape
             if (fh, fw) != (h, w):
                 # Automatic off-chip binning?
-                hbin, vbin = fw/w, fh/h
-                if hbin % 1 or vbin % 1:
-                    raise ValueError('Flat shape mismatch')
-                hbin, vbin = int(hbin), int(vbin)
-                flat_data = flat_data.reshape(h, vbin, w, hbin).\
-                    sum(3).sum(1)/(hbin*vbin)
+                hbin, vbin = int(fw/w), int(fh/h)
+                flat_data = flat_data[:h*vbin, :w*hbin] \
+                    .reshape(h, vbin, w, hbin).sum(3).sum(1)/(hbin*vbin)
 
             hdu.data /= flat_data
             hdu.header['FLATCORR'] = (
