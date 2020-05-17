@@ -272,7 +272,7 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
 
     good = (flux > 0).nonzero()
     if len(good[0]):
-        sources['mag'][good] = -2.5*log10(flux[good]/texp)
+        sources['mag'][good] = -2.5*log10(flux[good]/texp) + 20
         sources['mag_err'][good] = 2.5*log10(1 + flux_err[good]/flux[good])
 
     sources['aper_a'] = a
