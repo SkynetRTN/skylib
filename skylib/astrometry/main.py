@@ -58,7 +58,7 @@ class Solver(object):
 
         # Sort indexes by the number of quads (try smaller indexes first -
         # should be faster)
-        self.indexes.sort(key=lambda idx: idx.nquads)
+        self.indexes.sort(key=lambda _idx: _idx.nquads)
 
 
 class Solution(object):
@@ -92,7 +92,7 @@ def array_from_swig(data, shape, dtype=numpy.float64):
 def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
                 dec_degs=0, radius=180, min_scale=0.1, max_scale=10,
                 parity=None, sip_order=3, crpix_center=True, max_sources=None,
-                retry_lost=True):
+                retry_lost=True, callback=None):
     """
     Obtain astrometric solution given XY coordinates of field stars
 
@@ -123,6 +123,9 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
         mode, i.e. without coordinate restrictions (`radius` = 180) and with
         opposite parity, unless the initial search already had these
         restrictions disabled
+    :param callable callback: optional callable that is regularly called
+        by the solver, accepts no arguments, and returns 0 to interrupt
+        the solution and 1 otherwise
 
     :return: astrometric solution object; its `wcs` attribute is set to None if
         solution was not found
@@ -132,6 +135,16 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
     ra = float(ra_hours)*15
     dec = float(dec_degs)
     r = float(radius)
+
+    # Set timer callback if requested
+    if callback is not None:
+        an_engine.set_timer_callback(
+            solver,
+            ctypes.cast(
+                ctypes.CFUNCTYPE(ctypes.c_int)(callback),
+                ctypes.c_voidp).value)
+    else:
+        an_engine.set_timer_callback(solver, 0)
 
     # Set field star position array
     n = len(xy)
