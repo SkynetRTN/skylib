@@ -3,7 +3,6 @@ import sys
 import os
 from glob import glob
 from distutils import ccompiler as cc
-from numpy.distutils.core import Extension, setup
 import numpy.distutils.misc_util
 
 
@@ -11,29 +10,6 @@ linux_platform = sys.platform.startswith('linux')
 bsd_platform = 'bsd' in sys.platform
 osx_platform = 'darwin' in sys.platform
 win_platform = sys.platform.startswith('win')
-
-
-# Prevent linking against MSVCRxx.dll on Windows when compiled with mingw32
-if win_platform:
-    class IntWithLstrip(int):
-        def lstrip(self, _=None):
-            return self
-
-    dummy_msvc_runtime_library = False
-    save_msvc_runtime_version = numpy.distutils.misc_util.msvc_runtime_version
-
-    def msvc_runtime_version_override():
-        if dummy_msvc_runtime_library:
-            return
-        return save_msvc_runtime_version()
-
-    numpy.distutils.misc_util.msvc_runtime_version = \
-        msvc_runtime_version_override
-
-    for arg in sys.argv[1:]:
-        if arg.startswith('--compiler=') and arg.split('=', 1)[1] == 'mingw32':
-            dummy_msvc_runtime_library = True
-            break
 
 
 # A hack: compiler override for all commands, incl. those that do not
@@ -55,9 +31,27 @@ for arg in sys.argv[1:]:
 if ccompiler is None:
     ccompiler = cc.get_default_compiler()
 
+# Prevent linking against MSVCRxx.dll on Windows when compiled with mingw32
+if win_platform:
+    class IntWithLstrip(int):
+        def lstrip(self, _=None):
+            return self
+
+    dummy_msvc_runtime_library = False
+    save_msvc_runtime_version = numpy.distutils.misc_util.msvc_runtime_version
+
+    def msvc_runtime_version_override():
+        if dummy_msvc_runtime_library:
+            return
+        return save_msvc_runtime_version()
+
+    numpy.distutils.misc_util.msvc_runtime_version = \
+        msvc_runtime_version_override
+
 
 # Astrometry.net won't compile with MSVC; force Mingw-W64
-if win_platform and ccompiler == 'msvc':
+an_engine_compiler = 'mingw32'
+if win_platform and ccompiler != an_engine_compiler:
     from numpy.distutils.command import build_clib, build_ext
 
     old_build_clib = build_clib.build_clib
@@ -68,7 +62,7 @@ if win_platform and ccompiler == 'msvc':
             if libname in ('gsl-an', 'kd', 'qfits-an', 'posix', 'regex'):
                 save_ccompiler = self.compiler
                 self.compiler = cc.new_compiler(
-                    compiler='mingw32', verbose=self.verbose,
+                    compiler=an_engine_compiler, verbose=self.verbose,
                     dry_run=self.dry_run, force=self.force)
                 self.compiler.customize(self.distribution)
                 self.compiler.customize_cmd(self)
@@ -88,12 +82,12 @@ if win_platform and ccompiler == 'msvc':
     class BuildExtMingw32(old_build_ext):
         def build_extension(self, ext):
             global dummy_msvc_runtime_library
-            if ext.name == 'forte.util.astrometry._an_engine':
+            if ext.name == 'skylib.astrometry._an_engine':
                 prev_msvc_runtime_library = dummy_msvc_runtime_library
                 dummy_msvc_runtime_library = True
                 save_ccompiler = self.compiler
                 self.compiler = cc.new_compiler(
-                    compiler='mingw32', verbose=self.verbose,
+                    compiler=an_engine_compiler, verbose=self.verbose,
                     dry_run=self.dry_run, force=self.force)
                 self.compiler.customize(self.distribution)
                 self.compiler.customize_cmd(self)
@@ -107,18 +101,26 @@ if win_platform and ccompiler == 'msvc':
     build_ext.build_ext = BuildExtMingw32
 
 
-# Link with static standard libraries on MinGW-W64 to simplify binary
+# Link with static standard libraries on mingw and cygwin to simplify binary
 # distribution
 extra_link_args = []
 mingw32_link_args = ['-static-libgcc', '-static-libstdc++', '-static']
 if ccompiler == 'mingw32':
     extra_link_args += mingw32_link_args
 
+    # Prevent linking against MSVCRxx.dll
+    dummy_msvc_runtime_library = True
+
 
 tparty = 'skylib/thirdparty/'
 anet = tparty + 'astrometry.net/'
 extra = tparty + 'anet_extra/'
 gsl = anet + 'gsl-an/'
+
+
+# Define platform-dependent extensions
+import numpy.distutils.core
+Extension = numpy.distutils.core.Extension
 
 # noinspection PyTypeChecker
 an_engine_ext = Extension(
@@ -127,11 +129,11 @@ an_engine_ext = Extension(
     [anet + 'util/{}.c'.format(fn) for fn in (
         'an-endian', 'bl', 'codekd', 'datalog', 'errors', 'fit-wcs', 'fitsbin',
         'fitsfile', 'fitsioutils', 'fitstable', 'gslutils', 'healpix', 'index',
-        'ioutils', 'log', 'mathutil', 'os-features', 'permutedsort', 'quadfile',
+        'ioutils', 'log', 'matchobj', 'mathutil', 'permutedsort', 'quadfile',
         'sip', 'sip-utils', 'starkd', 'starutil', 'starxy', 'tic',
     )] +
     [anet + 'solver/{}.c'.format(fn) for fn in (
-        'matchobj', 'quad-utils', 'solver', 'tweak', 'tweak2', 'verify',
+        'quad-utils', 'solver', 'tweak', 'tweak2', 'verify',
     )],
     libraries=[
         ('gsl-an', dict(
@@ -173,19 +175,29 @@ an_engine_ext = Extension(
         ('qfits-an', dict(
             sources=glob(anet + 'qfits-an/*.c'),
             include_dirs=[anet + fn
-                          for fn in ('include', 'include/astrometry', 'util')],
+                          for fn in ('include', 'include/astrometry',
+                                     'qfits-an', 'util')],
         )),
     ],
     include_dirs=[anet + fn
                   for fn in ('include', 'include/astrometry', 'gsl-an',
                              'libkd', 'qfits-an', 'util')],
-    # Don't use os-features-config.h, define OS-specific macros in setup.py
-    define_macros=[('DONT_INCLUDE_OS_FEATURES_CONFIG_H', None)],
     extra_link_args=extra_link_args,
 )
 
 if win_platform:
-    # Astrometry.net on Win needs external implementations of mmap and regex
+    # Fix index file corruption in anqfits.c on Windows
+    for _libname, _libdef in an_engine_ext.libraries:
+        if _libname == 'qfits-an':
+            for f in ('anqfits', 'qfits_memory'):
+                _libdef['sources'].remove(anet + 'qfits-an\\' + f + '.c')
+                _libdef['sources'].append(extra + 'qfits-an/' + f + '.c')
+    for f in ('ioutils',):
+        an_engine_ext.sources.remove(anet + 'util/{}.c'.format(f))
+        an_engine_ext.sources.append(extra + '{}.c'.format(f))
+
+if ccompiler == 'mingw32':
+    # mingw-w64 needs external implementations of certain features
     for _libname, libdef in an_engine_ext.libraries:
         if _libname in ('kd', 'qfits-an'):
             libdef['include_dirs'] += [extra, extra + 'regex']
@@ -213,25 +225,10 @@ if win_platform:
     an_engine_ext.extra_compile_args += ['-include', extra + 'an-defs.h']
     an_engine_ext.define_macros += [
         ('_POSIX', None),
-        ('NEED_CANONICALIZE_FILE_NAME', '1'),
-        ('NEED_DECLARE_QSORT_R', '1'),
-        ('NEED_QSORT_R', '1'),
-        ('NEED_SWAP_QSORT_R', '0'),
     ]
-elif sys.platform.startswith('freebsd') or osx_platform:
-    an_engine_ext.define_macros += [
-        ('NEED_CANONICALIZE_FILE_NAME', '1'),
-        ('NEED_DECLARE_QSORT_R', '1'),
-        ('NEED_QSORT_R', '0'),
-        ('NEED_SWAP_QSORT_R', '0'),
-    ]
-else:
-    an_engine_ext.define_macros += [
-        ('NEED_CANONICALIZE_FILE_NAME', '0'),
-        ('NEED_DECLARE_QSORT_R', '0'),
-        ('NEED_QSORT_R', '0'),
-        ('NEED_SWAP_QSORT_R', '1'),
-    ]
+elif ccompiler == 'cygwin':
+    # Cygwin does not define __int64
+    an_engine_ext.define_macros += [('__int64', 'long long')]
 
 rcrlib_ext = Extension(
     name='skylib.util.RCRLib._RCRLib',
@@ -239,7 +236,7 @@ rcrlib_ext = Extension(
     extra_compile_args=['-std=c++11'],
 )
 
-setup(
+numpy.distutils.core.setup(
     name='SkyLib',
     version='0.1.3',
     requires=['numpy', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep', 'astroscrappy'],
