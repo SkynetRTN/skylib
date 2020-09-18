@@ -169,8 +169,7 @@ an_engine_ext = Extension(
                     'kdtree_fits_io', 'kdtree_mem')],
             include_dirs=[anet + fn
                           for fn in ('include', 'include/astrometry',
-                                     'qfits-an', 'util')] + [extra],
-            macros=[('DONT_INCLUDE_OS_FEATURES_CONFIG_H', None)],
+                                     'qfits-an', 'util')],
         )),
         ('qfits-an', dict(
             sources=glob(anet + 'qfits-an/*.c'),
