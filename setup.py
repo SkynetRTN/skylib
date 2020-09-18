@@ -169,7 +169,7 @@ an_engine_ext = Extension(
                     'kdtree_fits_io', 'kdtree_mem')],
             include_dirs=[anet + fn
                           for fn in ('include', 'include/astrometry',
-                                     'qfits-an', 'util')],
+                                     'qfits-an', 'util')] + [extra],
             macros=[('DONT_INCLUDE_OS_FEATURES_CONFIG_H', None)],
         )),
         ('qfits-an', dict(
@@ -181,7 +181,7 @@ an_engine_ext = Extension(
     ],
     include_dirs=[anet + fn
                   for fn in ('include', 'include/astrometry', 'gsl-an',
-                             'libkd', 'qfits-an', 'util')] + [extra],
+                             'libkd', 'qfits-an', 'util')],
     extra_link_args=extra_link_args,
 )
 
@@ -221,7 +221,7 @@ if ccompiler == 'mingw32':
         )),
         'iconv', 'ws2_32',
     ]
-    an_engine_ext.include_dirs += [extra + 'regex', extra + 'endian']
+    an_engine_ext.include_dirs += [extra, extra + 'regex', extra + 'endian']
     an_engine_ext.extra_compile_args += ['-include', extra + 'an-defs.h']
     an_engine_ext.define_macros += [
         ('_POSIX', None),
