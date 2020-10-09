@@ -207,21 +207,34 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
         else:
             solver.endobj = 0
 
-        # Add indexes needed to solve the field
-        an_engine.solver_clear_indexes(solver)
+        # Find indexes needed to solve the field
         fmin = solver.quadsize_min*min_scale
         fmax = numpy.hypot(width, height)*max_scale
+        indices = []
         for index in engine.indexes:
             if fmin > index.index_scale_upper or fmax < index.index_scale_lower:
                 continue
             if not an_engine.index_is_within_range(index, ra, dec, r):
                 continue
 
-            an_engine.solver_add_index(solver, index)
+            indices.append(index)
 
-        if not an_engine.solver_n_indices(solver):
+        if not len(indices):
             raise ValueError(
                 'No indexes found for the given scale and position')
+
+        # Sort indices by scale (larger scales/smaller indices first - should
+        # be faster) then by distance from expected position
+        indices.sort(
+            key=lambda _idx: (
+                -_idx.index_scale_upper,
+                an_engine.healpix_distance_to_radec(
+                    _idx.healpix, _idx.hpnside, ra, dec)
+                if _idx.healpix >= 0 else 0,
+            ))
+        an_engine.solver_clear_indexes(solver)
+        for index in indices:
+            an_engine.solver_add_index(solver, index)
 
         # Run the solver
         an_engine.solver_run(solver)
