@@ -18,9 +18,9 @@ __all__ = ['get_image']
 
 
 def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
-              zcontrast=0.25, stretch='linear', a=None, bias=0.5, contrast=1,
-              nsamples=1000, krej=2.5, max_iterations=5, cmap=None, dpi=100,
-              **kwargs):
+              zcontrast=0.25, nsamples=1000, krej=2.5, max_iterations=5,
+              stretch='linear', a=None, bias=0.5, contrast=1, cmap=None,
+              dpi=100, **kwargs):
     u"""
     Return a byte array containing image in the given format
 
@@ -52,6 +52,12 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             defaulting to data.size/2
     :param float zcontrast: for ``norm`` == "zscale", the scaling factor,
         0 < zcontrast < 1, defaulting to 0.25
+    :param int nsamples: for ``norm`` == "zscale", the number of points in
+        the input array for determining scale factors, defaulting to 1000
+    :param float krej: for ``norm`` == "zscale", the sigma clipping factor,
+        defaulting to 2.5
+    :param int max_iterations: for ``norm`` == "zscale", the maximum number
+        of rejection iterations, defaulting to 5
     :param str stretch: [0, 1] → [0, 1] mapping mode::
         "asinh": hyperbolic arcsine stretch y = asinh(x/a)/asinh(1/a)
         "contrast": linear bias/contrast-based stretch
@@ -77,12 +83,6 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
         defaulting to 0.5
     :param float contrast: for ``stretch`` == "contrast", the contrast
         parameter, defaulting to 1
-    :param int nsamples: for ``stretch`` == "zscale", the number of points in
-        the input array for determining scale factors, defaulting to 1000
-    :param float krej: for ``stretch`` == "zscale", the sigma clipping factor,
-        defaulting to 2.5
-    :param int max_iterations: for ``stretch`` == "zscale", the maximum number
-        of rejection iterations, defaulting to 5
     :param str cmap: optional matplotlib colormap name, defaulting to grayscale;
         when a non-grayscale colormap is specified, the conversion is always
         done by matplotlib, regardless of the availability of Pillow; see
