@@ -47,7 +47,7 @@ def apply_transform_stars(img: ndarray,
     h, w = img.shape
     avg = img.mean()
     if w < ref_width or h < ref_height:
-        new_img = full((ref_height, ref_width), avg, img.dtype)
+        new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
         if isinstance(img, ma.MaskedArray) and img.mask.any():
             new_img[:h, :w] = img.data
             mask = ones([ref_height, ref_width], bool)
@@ -153,7 +153,7 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
     h, w = img.shape
     avg = img.mean()
     if w < ref_width or h < ref_height:
-        new_img = full((ref_height, ref_width), avg, img.dtype)
+        new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
         if isinstance(img, ma.MaskedArray) and img.mask.any():
             new_img[:h, :w] = img.data
             mask = ones([ref_height, ref_width], bool)
