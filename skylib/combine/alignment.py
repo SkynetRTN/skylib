@@ -9,8 +9,8 @@ Image alignment.
 from typing import List as TList, Tuple, Union
 
 from numpy import (
-    array, float32, full, indices, ma, mgrid, ndarray, ones, sqrt, transpose,
-    zeros)
+    array, empty, float32, full, indices, ma, mgrid, ndarray, ones, sqrt,
+    transpose, zeros)
 from numpy.linalg import lstsq
 import scipy.ndimage
 from astropy.wcs import WCS
@@ -171,13 +171,18 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
         else:
             mask = zeros(img.shape, float32)
 
+        # Calculate the transformation row by row to avoid problems
+        # in all_pix2world() for large images
         dst_y, dst_x = indices((ref_height, ref_width))
-        a, d = dst_wcs.all_pix2world(dst_x, dst_y, 0)
-        coordinates = src_wcs.all_world2pix(a, d, 0, quiet=True)[::-1]
+        coord = empty((2, h, w), float32)
+        for i in range(h):
+            a, d = dst_wcs.all_pix2world(dst_x[i], dst_y[i], 0)
+            coord[1, i, :], coord[0, i, :] = src_wcs.all_world2pix(
+                a, d, 0, quiet=True)
 
         res = ma.MaskedArray(
-            scipy.ndimage.map_coordinates(img, coordinates, mode='nearest'),
-            scipy.ndimage.map_coordinates(mask, coordinates, cval=1) > 0.06,
+            scipy.ndimage.map_coordinates(img, coord, mode='nearest'),
+            scipy.ndimage.map_coordinates(mask, coord, cval=1) > 0.06,
             fill_value=avg)
 
         # Match the reference image size
