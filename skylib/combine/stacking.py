@@ -10,10 +10,11 @@ from __future__ import absolute_import, division, print_function
 from datetime import timedelta
 import os.path
 import logging
+from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, float32, indices, int32, ma, median,
-    percentile as np_percentile, zeros)
+    argmax, array, bincount, indices, int32, ma, median, nan, nanpercentile,
+    ndarray, percentile as np_percentile, vstack)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -23,30 +24,36 @@ from ..util.fits import get_fits_time
 __all__ = ['combine']
 
 
-def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
-            percentile=50, lo=None, hi=None):
+def combine(input_data: List[Union[pyfits.HDUList,
+                                   Tuple[ndarray, pyfits.Header]]],
+            mode: str = 'average', scaling: Optional[str] = None,
+            rejection: Optional[str] = None, min_keep: int = 2,
+            percentile: float = 50.0,
+            lo: Optional[float] = None, hi: Optional[float] = None,
+            max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
+        -> pyfits.HDUList:
     """
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
 
-    :param list data: sequence of FITS images or tuples (data, header)
-        to combine; FITS files should have the same number of HDUs and,
-        separately for each HDU, same data dimensions
-    :param str mode: stacking mode: "average" (default), "sum", "percentile",
-        or "mode"
-    :param str scaling: scaling mode: None (default) - do not scale data,
+    :param input_data: two or more FITS images or pairs (data, header)
+        to combine; FITS files must be opened in readonly mode and have all
+        the same number of HDUs and, separately for each HDU, the same data
+        dimensions
+    :param mode: stacking mode: "average" (default), "sum", or "percentile"
+    :param scaling: scaling mode: None (default) - do not scale data,
         "average" - scale data to match average values, "percentile" - match
         the given percentile (median for `percentile` = 50), "mode" - match
         modal values
-    :param str rejection: outlier rejection mode: None (default) - do not reject
+    :param rejection: outlier rejection mode: None (default) - do not reject
         outliers, "chauvenet" - use Chauvenet robust outlier rejection,
         "iraf" - IRAF-like clipping of `lo` lowest and `hi` highest values,
         "minmax" - reject values outside the absolute lower and upper limits
         (use with caution as `min_keep` below is not guaranteed, and you may end
         up in all values rejected for some or even all pixels), "sigclip" -
         iteratively reject pixels below and/or above the baseline
-    :param int min_keep: minimum values to keep during rejection
-    :param int percentile: for `mode`="percentile", default: 50 (median)
+    :param min_keep: minimum values to keep during rejection
+    :param percentile: for `mode`="percentile", default: 50 (median)
     :param lo:
         `rejection` = "iraf": number of lowest values to clip; default: 1
         `rejection` = "minmax": reject values below this limit; default: not set
@@ -57,18 +64,21 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         `rejection` = "minmax": reject values above this limit; default: not set
         `rejection` = "sigclip": reject values more than `hi` sigmas above the
             baseline; default: 3
+    :param max_mem_mb: maximum amount of RAM in megabytes to use during stacking
+    :param callback: optional callable
+            def callback(percent: float) -> None
+        that is periodically called to update the progress of stacking operation
 
     :return: FITS image containing the same number of HDUs as input, with data
         set to combined array(s) and header(s) copied from one of the input
         images and modified to reflect the stacking mode and parameters
-    :rtype: astropy.io.fits.HDUList
     """
-    n = len(data)
-    if not len(data):
+    n = len(input_data)
+    if n < 2:
         raise ValueError('No data to combine')
 
     nhdus = None
-    for f in data:
+    for f in input_data:
         if isinstance(f, pyfits.HDUList):
             m = len(f)
         else:
@@ -81,46 +91,100 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
     # Process each HDU separately
     fits = pyfits.HDUList()
     for hdu_no in range(nhdus):
-        datacube = array([f[hdu_no].data if isinstance(f, pyfits.HDUList)
-                          else f[0] for f in data]).astype(float32)
-
-        # Scale data
-        if scaling and n < 2:
-            scaling = None
+        # Calculate scaling factors
+        k_ref, k = None, []
         if scaling:
-            if scaling == 'average':
-                k = datacube.mean((1, 2))
-            elif scaling == 'percentile':
-                if percentile == 50:
-                    k = median(datacube, (1, 2))
+            for data_no, f in enumerate(input_data):
+                if isinstance(f, pyfits.HDUList):
+                    data = f[hdu_no].data
                 else:
-                    k = np_percentile(datacube, percentile, (1, 2))
-            elif scaling == 'mode':
-                # Compute modal values from histograms; convert to integer and
-                # assume 2 x 16-bit data range
-                min_vals = datacube.min((1, 2))
-                k = [
-                    argmax(bincount(d.ravel()))
-                    for d in (datacube - min_vals[..., None, None]).
-                    clip(0, 2*0x10000 - 1).astype(int32)] + min_vals
+                    data = f[0]
+                if scaling == 'average':
+                    k.append(data.mean())
+                elif scaling == 'percentile':
+                    if percentile == 50:
+                        k.append(
+                            median(data) if not isinstance(data, ma.MaskedArray)
+                            else ma.median(data))
+                    else:
+                        k.append(
+                            np_percentile(data, percentile)
+                            if not isinstance(data, ma.MaskedArray)
+                            else np_percentile(data.compressed(), percentile))
+                elif scaling == 'mode':
+                    # Compute modal values from histograms; convert to integer
+                    # and assume 2 x 16-bit data range
+                    if isinstance(data, ma.MaskedArray):
+                        data = data.compressed()
+                    else:
+                        data = data.ravel()
+                    min_val = data.min(initial=0)
+                    k.append(
+                        argmax(bincount(
+                            (data - min_val).clip(0, 2*0x10000 - 1)
+                            .astype(int32))) + min_val)
+                else:
+                    raise ValueError(
+                        'Unknown scaling mode "{}"'.format(scaling))
+                if callback is not None:
+                    callback((hdu_no + (data_no + 1)/n/2)/nhdus*100)
+
+            # Normalize to the first frame with non-zero average; keep images
+            # with zero or same average as is
+            k_ref = k[0]
+            if not k_ref:
+                for ki in k[1:]:
+                    if ki:
+                        k_ref = ki
+                        break
+
+        # Process data in chunks to fit in the maximum amount of RAM allowed
+        rowsize = 0
+        data_width = data_height = 0
+        for data in input_data:
+            if isinstance(data, pyfits.HDUList):
+                data = data[hdu_no].data
             else:
-                raise ValueError('Unknown scaling mode "{}"'.format(scaling))
+                data = data[0]
+            h, w = data.shape
+            if not rowsize:
+                data_width, data_height = w, h
+            elif (data_width, data_height) != (w, h):
+                raise ValueError(
+                    'Trying to combine arrays with non-matching dinensions: '
+                    '{:d}x{:d} and {:d}x{:d}'.format(
+                        data_width, data_height, w, h))
+            rowsize += data[0].nbytes
+            if rejection or isinstance(data, ma.MaskedArray):
+                rowsize += data_width
+        chunksize = min(max(int(max_mem_mb*(1 << 20)/rowsize), 1), data_height)
+        while chunksize > 1:
+            # Use as small chunks as possible but keep their total number
+            if len(list(range(0, data_height, chunksize - 1))) > \
+                    len(list(range(0, data_height, chunksize))):
+                break
+            chunksize -= 1
+        chunks = []
+        rej_percent = 0
+        for chunk in range(0, data_height, chunksize):
+            datacube = [
+                f[hdu_no][chunk:chunk + chunksize]
+                if isinstance(f, pyfits.HDUList)
+                else f[0][chunk:chunk + chunksize]
+                for f in input_data
+            ]
+            if k_ref:
+                # Scale data
+                for data, ki in zip(datacube, k):
+                    if ki not in (0, k_ref):
+                        data *= k_ref/ki
 
-            # Normalize to the first frame; keep images with zero or same
-            # average as is
-            k[(k == 0).nonzero()] = 1
-            k = k[0]/k
-            scale_needed = (k != 1).nonzero()
-            datacube[scale_needed] *= k[scale_needed][..., None, None]
-
-        # Reject outliers
-        rej_percent = 0.0
-        if rejection and n < 2:
-            rejection = None
-        if rejection:
-            if not isinstance(datacube, ma.MaskedArray):
-                datacube = ma.masked_array(
-                    datacube, zeros(datacube.shape, bool))
+            # Reject outliers
+            if rejection or any(isinstance(data, ma.MaskedArray)
+                                for data in datacube):
+                datacube = ma.masked_array(datacube)
+            else:
+                datacube = array(datacube)
 
             if rejection == 'chauvenet':
                 datacube.mask = chauvenet(datacube, min_vals=min_keep)
@@ -129,7 +193,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
                     lo = 1
                 if hi is None:
                     hi = 1
-                if len(data) - (lo + hi) < min_keep:
+                if n - (lo + hi) < min_keep:
                     raise ValueError(
                         'IRAF rejection with lo={}, hi={} would keep less than '
                         '{} values for a {}-image set'.format(
@@ -149,7 +213,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
                     datacube.mask[((datacube < lo) |
                                    (datacube > hi)).nonzero()] = True
                     if datacube.mask.all(0).any():
-                        logging.warn(
+                        logging.warning(
                             '%d completely masked pixels left after minmax '
                             'rejection', datacube.mask.all(0).sum())
             elif rejection == 'sigclip':
@@ -172,7 +236,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
                         del avg, sigma, resid, outliers
                         break
                     datacube.mask[outliers.nonzero()] = True
-            else:
+            elif rejection:
                 raise ValueError(
                     'Unknown rejection mode "{}"'.format(rejection))
 
@@ -181,24 +245,41 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
                 datacube = datacube.data
             else:
                 # Calculate the percentage of rejected pixels
-                rej_percent = datacube.mask.sum()/datacube.size*100
+                rej_percent += datacube.mask.sum()
 
-        # Combine data
-        if mode == 'average':
-            res = datacube.mean(0)
-        elif mode == 'sum':
-            res = datacube.sum(0)
-        elif mode == 'percentile':
-            if percentile == 50:
-                res = median(datacube, 0)
+            # Combine data
+            if mode == 'average':
+                res = datacube.mean(0)
+            elif mode == 'sum':
+                res = datacube.sum(0)
+            elif mode == 'percentile':
+                if percentile == 50:
+                    if isinstance(datacube, ma.MaskedArray):
+                        res = ma.median(datacube, 0)
+                    else:
+                        res = median(datacube, 0)
+                else:
+                    if isinstance(datacube, ma.MaskedArray):
+                        res = np_percentile(datacube, percentile, 0)
+                    else:
+                        res = nanpercentile(
+                            ma.filled(datacube, nan), percentile, 0)
             else:
-                res = np_percentile(datacube, percentile, 0)
-        else:
-            raise ValueError('Unknown stacking mode "{}"'.format(mode))
+                raise ValueError('Unknown stacking mode "{}"'.format(mode))
+            chunks.append(res)
 
-        # Update FITS header, start from the first image
+            if callback is not None:
+                callback(
+                    (hdu_no + (0.5 if scaling else 0) +
+                     min(chunk + chunksize, data_height)/data_height /
+                     (2 if scaling else 1))/nhdus*100)
+
+        res = vstack(chunks)
+        del chunks
+
+        # Update FITS headers, start from the first image
         headers = [f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
-                   for f in data]
+                   for f in input_data]
         hdr = headers[0].copy(strip=True)
 
         exp_lengths = [
@@ -278,7 +359,8 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
         elif rejection == 'sigclip':
             hdr['SLOW'] = (lo, 'Lower sigma used with rejection')
             hdr['SHIGH'] = (hi, 'Upper sigma used with rejection')
-        hdr['REJPRCNT'] = (float(rej_percent), 'Percentage of rejected pixels')
+        hdr['REJPRCNT'] = (float(rej_percent/data_width/data_height/n*100),
+                           'Percentage of rejected pixels')
 
         hdr['SCAMETH'] = (
             scaling.upper() if scaling is not None else 'NONE',
@@ -288,7 +370,7 @@ def combine(data, mode='average', scaling=None, rejection=None, min_keep=2,
 
         hdr['NCOMB'] = (n, 'Number of images used in combining')
 
-        for i, im in enumerate(data):
+        for i, im in enumerate(input_data):
             if isinstance(im, pyfits.HDUList) and im.filename():
                 hdr['IMGS{:04d}'.format(i)] = (
                     os.path.basename(im.filename()), 'Component filename')
