@@ -240,12 +240,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 raise ValueError(
                     'Unknown rejection mode "{}"'.format(rejection))
 
-            if not datacube.mask.any():
-                # Nothing was rejected
-                datacube = datacube.data
-            else:
-                # Calculate the percentage of rejected pixels
-                rej_percent += datacube.mask.sum()
+            if isinstance(datacube, ma.MaskedArray):
+                if not datacube.mask.any():
+                    # Nothing was rejected
+                    datacube = datacube.data
+                else:
+                    # Calculate the percentage of rejected pixels
+                    rej_percent += datacube.mask.sum()
 
             # Combine data
             if mode == 'average':
