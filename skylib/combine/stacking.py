@@ -151,7 +151,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 data_width, data_height = w, h
             elif (data_width, data_height) != (w, h):
                 raise ValueError(
-                    'Trying to combine arrays with non-matching dinensions: '
+                    'Trying to combine arrays with non-matching dimensions: '
                     '{:d}x{:d} and {:d}x{:d}'.format(
                         data_width, data_height, w, h))
             rowsize += data[0].nbytes
@@ -168,7 +168,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
         rej_percent = 0
         for chunk in range(0, data_height, chunksize):
             datacube = [
-                f[hdu_no][chunk:chunk + chunksize]
+                f[hdu_no].data[chunk:chunk + chunksize]
                 if isinstance(f, pyfits.HDUList)
                 else f[0][chunk:chunk + chunksize]
                 for f in input_data
