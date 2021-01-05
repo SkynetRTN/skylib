@@ -24,7 +24,8 @@ def apply_transform_stars(img: ndarray,
                                            ndarray],
                           dst_stars: Union[TList[Tuple[float, float]],
                                            ndarray],
-                          ref_width: int, ref_height: int) -> ma.MaskedArray:
+                          ref_width: int, ref_height: int,
+                          prefilter: bool = True) -> ma.MaskedArray:
     """
     Align an image based on pixel coordinates of one or more stars
 
@@ -35,6 +36,7 @@ def apply_transform_stars(img: ndarray,
         `src_stars` in the reference image
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
+    :param prefilter: apply spline filter before interpolation
 
     :return: transformed image
     """
@@ -68,8 +70,9 @@ def apply_transform_stars(img: ndarray,
     if nref == 1:
         # Pure shift
         offset = [dst_y[0] - src_y[0], dst_x[0] - src_x[0]]
-        img = scipy.ndimage.shift(img, offset, mode='nearest')
-        mask = scipy.ndimage.shift(mask, offset, cval=True)
+        img = scipy.ndimage.shift(
+            img, offset, mode='nearest', prefilter=prefilter)
+        mask = scipy.ndimage.shift(mask, offset, cval=True, prefilter=prefilter)
     else:
         if nref == 2:
             # Partial affine transform (shift + rotation + uniform scale)
@@ -95,9 +98,10 @@ def apply_transform_stars(img: ndarray,
             px = lstsq(a, src_x, rcond=None)[0]
             mat = array([py[:2], px[:2]])
             offset = [py[2], px[2]]
-        img = scipy.ndimage.affine_transform(img, mat, offset, mode='nearest')
+        img = scipy.ndimage.affine_transform(
+            img, mat, offset, mode='nearest', prefilter=prefilter)
         mask = scipy.ndimage.affine_transform(
-            mask, mat, offset, cval=True) > 0.06
+            mask, mat, offset, cval=True, prefilter=prefilter) > 0.06
 
     # Match the reference image size
     if w > ref_width or h > ref_height:
@@ -131,7 +135,8 @@ wcs_grid = {
 
 def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
                         ref_width: int, ref_height: int,
-                        grid_points: int = 0) -> ma.MaskedArray:
+                        grid_points: int = 0,
+                        prefilter: bool = False) -> ma.MaskedArray:
     """
     Align an image based on WCS
 
@@ -146,6 +151,7 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
         2: shift + rotation + uniform scale (2-star) alignment using two points
         >= 3: full affine transform using the given number of fake "alignment
             stars" generated from the WCS
+    :param prefilter: apply spline filter before interpolation
 
     :return: transformed image
     """
@@ -181,8 +187,10 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
                 a, d, 0, quiet=True)
 
         res = ma.MaskedArray(
-            scipy.ndimage.map_coordinates(img, coord, mode='nearest'),
-            scipy.ndimage.map_coordinates(mask, coord, cval=1) > 0.06,
+            scipy.ndimage.map_coordinates(
+                img, coord, mode='nearest', prefilter=prefilter),
+            scipy.ndimage.map_coordinates(
+                mask, coord, cval=1, prefilter=prefilter) > 0.06,
             fill_value=avg)
 
         # Match the reference image size
@@ -213,7 +221,7 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
 
     img = apply_transform_stars(
         img, transpose([src_x, src_y]), transpose([dst_x, dst_y]),
-        ref_width, ref_height)
+        ref_width, ref_height, prefilter=prefilter)
 
     # Match the reference image size
     if w > ref_width or h > ref_height:
