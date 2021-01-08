@@ -199,11 +199,12 @@ def combine(input_data: List[Union[pyfits.HDUList,
                         '{} values for a {}-image set'.format(
                             lo, hi, min_keep, n))
                 if lo or hi:
+                    # Mask "lo" smallest values and "hi" largest values along
+                    # the 0th axis
                     order = datacube.argsort(0)
-                    mg = indices(datacube.shape[1:])
+                    mg = tuple(i.ravel() for i in indices(datacube.shape[1:]))
                     for j in range(-hi, lo):
-                        datacube.mask[[order[j].ravel()] +
-                                      [tuple(i.ravel() for i in mg)]] = True
+                        datacube.mask[(order[j].ravel(),) + mg] = True
                     del order, mg
             elif rejection == 'minmax':
                 if lo is not None and hi is not None:
