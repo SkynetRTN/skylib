@@ -231,7 +231,7 @@ elif ccompiler == 'cygwin':
 
 rcrlib_ext = Extension(
     name='skylib.util.RCRLib._RCRLib',
-    sources=glob('skylib/util/RCRLib/*.c*'),
+    sources=glob('skylib/util/RCRLib/*.c??'),
     extra_compile_args=['-std=c++11'],
 )
 
