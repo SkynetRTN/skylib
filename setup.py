@@ -169,7 +169,7 @@ an_engine_ext = Extension(
                     'kdtree_fits_io', 'kdtree_mem')],
             include_dirs=[anet + fn
                           for fn in ('include', 'include/astrometry',
-                                     'qfits-an', 'util')],
+                                     'qfits-an', 'util')] + [extra + 'anet'],
         )),
         ('qfits-an', dict(
             sources=glob(anet + 'qfits-an/*.c'),
@@ -180,7 +180,7 @@ an_engine_ext = Extension(
     ],
     include_dirs=[anet + fn
                   for fn in ('include', 'include/astrometry', 'gsl-an',
-                             'libkd', 'qfits-an', 'util')],
+                             'libkd', 'qfits-an', 'util')] + [extra + 'anet'],
     extra_link_args=extra_link_args,
 )
 
