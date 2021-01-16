@@ -229,7 +229,7 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
             key=lambda _idx: (
                 -_idx.index_scale_upper,
                 an_engine.healpix_distance_to_radec(
-                    _idx.healpix, _idx.hpnside, ra, dec)
+                    _idx.healpix, _idx.hpnside, ra, dec)[0]
                 if _idx.healpix >= 0 else 0,
             ))
         an_engine.solver_clear_indexes(solver)
