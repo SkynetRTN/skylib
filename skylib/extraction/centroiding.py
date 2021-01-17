@@ -89,7 +89,7 @@ k_gauss = 2*numpy.sqrt(2*numpy.log(2))
 def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
     """
     Given the initial guess, obtain a more accurate source centroid position
-    using Gaussian PSF fitting
+    and ellipse parameters using Gaussian PSF fitting
 
     :param array_like data: 2D pixel data array
     :param float x: initial guess for the source X position (1-based)
@@ -100,7 +100,8 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
     :param float xtol: relative error desired in the approximate solution
     :param int maxfev: maximum number of calls to the function
 
-    :return: (x, y) - a pair of centroid coordinates
+    :return: (x, y, a, b, theta) - centroid coordinates plus ellipse semi-axes
+        and position angle in degrees
     """
     h, w = data.shape
     xc, yc = x - 1, y - 1
@@ -128,11 +129,14 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
     sigma = numpy.sqrt((box > ampl/2).sum())/k_gauss
 
     # Get centroid position by least-squares fitting
-    xc, yc = leastsq(
-        lambda p: gauss_ellip(x, y, p) - box,
+    p = leastsq(
+        lambda _p: gauss_ellip(x, y, _p) - box,
         numpy.array([xc - x1, yc - y1, 0, ampl, sigma, sigma, 0]),
-        ftol=ftol, xtol=xtol, maxfev=maxfev)[0][:2] + [x1, y1] + 1
-    return float(xc), float(yc)
+        ftol=ftol, xtol=xtol, maxfev=maxfev)[0]
+
+    return (
+        float(p[0]) + x1 + 1, float(p[1] + y1 + 1), float(p[4]), float(p[5]),
+        float(numpy.rad2deg(p[6])))
 
 
 def centroid_sources(data, x, y, radius=5, method='iraf'):
@@ -169,7 +173,9 @@ def centroid_sources(data, x, y, radius=5, method='iraf'):
         return xc + 1, yc + 1
 
     x, y = tuple(zip(*[
-        {'iraf': centroid_iraf, 'psf': centroid_psf}[method](data, x0, y0, r)
+        (centroid_psf if method == 'psf' else centroid_iraf)(
+            data, x0, y0, r,
+        )[:2]
         for x0, y0, r in numpy.transpose(
             [numpy.atleast_1d(x), numpy.atleast_1d(y),
              numpy.full_like(numpy.atleast_1d(x), radius)])]))
