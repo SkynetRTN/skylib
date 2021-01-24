@@ -121,13 +121,17 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
         else:
             b = a
         if theta:
-            theta = float(theta)*pi/180
+            theta = float(theta % 180)*pi/180
+            if theta > pi/2:
+                theta -= pi
         else:
             theta = 0
 
         if not have_background:
             if theta_out:
-                theta_out = float(theta_out)*pi/180
+                theta_out = float(theta_out % 180)*pi/180
+                if theta_out > pi/2:
+                    theta_out -= pi
             elif theta_out != 0:
                 theta_out = theta
             if a_in:
@@ -144,14 +148,17 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
                 b_out = a_out*b/a
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
-        theta = sources['theta']
+        a, b, theta = sources['a'], sources['b'], sources['theta']
+        bad = (a < b).nonzero()
+        a[bad], b[bad] = b[bad], a[bad]
+        theta[bad] += pi/2
+        theta %= pi
+        theta[(theta > pi/2).nonzero()] -= pi
         kron_r = clip(
-            sep.kron_radius(
-                img, x, y, sources['a'], sources['b'], theta, 6.0,
-                mask=mask)[0],
+            sep.kron_radius(img, x, y, a, b, theta, 6.0, mask=mask)[0],
             0.1, None)
-        elongation = sources['a']/sources['b']
         r = kron_r*k
+        elongation = a/b
         a, b = r*elongation, r/elongation
         if not have_background:
             a_in = a*(k_in/k)
