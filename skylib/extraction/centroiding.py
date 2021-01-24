@@ -134,9 +134,16 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
         numpy.array([xc - x1, yc - y1, 0, ampl, sigma, sigma, 0]),
         ftol=ftol, xtol=xtol, maxfev=maxfev)[0]
 
-    return (
-        float(p[0]) + x1 + 1, float(p[1] + y1 + 1), float(p[4]), float(p[5]),
-        float(numpy.rad2deg(p[6])))
+    a, b, theta = float(p[4]), float(p[5]), float(numpy.rad2deg(p[6]))
+    if a < b:
+        # Make sure a is semi-major axis
+        a, b = b, a
+        theta += 90
+    theta %= 180
+    if theta > 90:
+        theta -= 180
+
+    return float(p[0]) + x1 + 1, float(p[1] + y1 + 1), a, b, theta
 
 
 def centroid_sources(data, x, y, radius=5, method='iraf'):
