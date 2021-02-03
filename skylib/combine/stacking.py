@@ -277,8 +277,12 @@ def combine(input_data: List[Union[pyfits.HDUList,
                      min(chunk + chunksize, data_height)/data_height /
                      (2 if scaling else 1))/nhdus*100)
 
-        res = ma.vstack(chunks)
-        if res.mask is None or not res.mask.any():
+        if len(chunks) > 1:
+            res = ma.vstack(chunks)
+        else:
+            res = chunks[0]
+        if isinstance(res, ma.MaskedArray) and (
+                res.mask is None or not res.mask.any()):
             res = res.data
         del chunks
 
