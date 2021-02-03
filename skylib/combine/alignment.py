@@ -108,7 +108,7 @@ def apply_transform_stars(img: ndarray,
         img = img[:ref_height, :ref_width]
         mask = mask[:ref_height, :ref_width]
 
-    return ma.MaskedArray(img, mask, fill_value=avg)
+    return ma.masked_array(img, mask, fill_value=avg)
 
 
 wcs_grid = {

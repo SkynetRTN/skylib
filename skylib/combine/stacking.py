@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple, Union
 
 from numpy import (
     argmax, array, bincount, indices, int32, ma, median, nan, nanpercentile,
-    ndarray, percentile as np_percentile, vstack)
+    ndarray, percentile as np_percentile)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -31,7 +31,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             percentile: float = 50.0,
             lo: Optional[float] = None, hi: Optional[float] = None,
             max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
-        -> pyfits.HDUList:
+        -> List[Tuple[ndarray, pyfits.Header]]:
     """
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
@@ -69,9 +69,11 @@ def combine(input_data: List[Union[pyfits.HDUList,
             def callback(percent: float) -> None
         that is periodically called to update the progress of stacking operation
 
-    :return: FITS image containing the same number of HDUs as input, with data
-        set to combined array(s) and header(s) copied from one of the input
-        images and modified to reflect the stacking mode and parameters
+    :return: list of pairs (data, header) of the same length as the number
+        of HDUs in the input FITS images (one if a (data, header) list
+        was supplied on input), with data set to combined array(s) and header(s)
+        copied from one of the input images and modified to reflect the stacking
+        mode and parameters
     """
     n = len(input_data)
     if n < 2:
@@ -89,7 +91,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             raise ValueError('All files must have the same number of HDUs')
 
     # Process each HDU separately
-    fits = pyfits.HDUList()
+    output = []
     for hdu_no in range(nhdus):
         # Calculate scaling factors
         k_ref, k = None, []
@@ -242,7 +244,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     'Unknown rejection mode "{}"'.format(rejection))
 
             if isinstance(datacube, ma.MaskedArray):
-                if not datacube.mask.any():
+                if datacube.mask is None or not datacube.mask.any():
                     # Nothing was rejected
                     datacube = datacube.data
                 else:
@@ -262,10 +264,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
                         res = median(datacube, 0)
                 else:
                     if isinstance(datacube, ma.MaskedArray):
-                        res = np_percentile(datacube, percentile, 0)
+                        res = nanpercentile(datacube.filled(nan), percentile, 0)
                     else:
-                        res = nanpercentile(
-                            ma.filled(datacube, nan), percentile, 0)
+                        res = np_percentile(datacube, percentile, 0)
             else:
                 raise ValueError('Unknown stacking mode "{}"'.format(mode))
             chunks.append(res)
@@ -276,7 +277,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
                      min(chunk + chunksize, data_height)/data_height /
                      (2 if scaling else 1))/nhdus*100)
 
-        res = vstack(chunks)
+        if len(chunks) > 1:
+            res = ma.vstack(chunks)
+        else:
+            res = chunks[0]
+        if isinstance(res, ma.MaskedArray) and (
+                res.mask is None or not res.mask.any()):
+            res = res.data
         del chunks
 
         # Update FITS headers, start from the first image
@@ -377,14 +384,6 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 hdr['IMGS{:04d}'.format(i)] = (
                     os.path.basename(im.filename()), 'Component filename')
 
-        if isinstance(res, ma.MaskedArray):
-            res = res.data
+        output.append((res, hdr))
 
-        if not len(fits):
-            hdu = pyfits.PrimaryHDU(data=res, header=hdr)
-        else:
-            hdu = pyfits.ImageHDU(data=res, header=hdr)
-
-        fits.append(hdu)
-
-    return fits
+    return output
