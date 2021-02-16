@@ -19,7 +19,7 @@ from astropy.wcs import WCS
 __all__ = ['apply_transform_stars', 'apply_transform_wcs']
 
 
-def apply_transform_stars(img: ndarray,
+def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
                           src_stars: Union[TList[Tuple[float, float]],
                                            ndarray],
                           dst_stars: Union[TList[Tuple[float, float]],
@@ -133,7 +133,8 @@ wcs_grid = {
 }
 
 
-def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
+def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
+                        src_wcs: WCS, dst_wcs: WCS,
                         ref_width: int, ref_height: int,
                         grid_points: int = 0,
                         prefilter: bool = False) -> ma.MaskedArray:
@@ -162,7 +163,7 @@ def apply_transform_wcs(img: ndarray, src_wcs: WCS, dst_wcs: WCS,
         new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
         if isinstance(img, ma.MaskedArray) and img.mask.any():
             new_img[:h, :w] = img.data
-            mask = ones([ref_height, ref_width], bool)
+            mask = ones(new_img.shape, bool)
             mask[:h, :w] = img.mask
             img = ma.MaskedArray(new_img, mask)
         else:
