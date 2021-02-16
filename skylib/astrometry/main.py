@@ -97,7 +97,8 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
     Obtain astrometric solution given XY coordinates of field stars
 
     :param :class:`Solver` engine: Astrometry.net engine solver instance
-    :param array_like xy: (n x 2) array of X and Y pixel coordinates of stars
+    :param array_like xy: (n x 2) array of 0-based X and Y pixel coordinates
+        of stars
     :param array_like flux: optional n-element array of star fluxes
     :param int width: image width in pixels; defaults to the maximum minus
         minimum X coordinate of stars
@@ -166,11 +167,11 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
     try:
         # Initialize solver parameters
         if width:
-            minx, maxx = 1, int(width)
+            minx, maxx = 0, int(width) - 1
         else:
             minx, maxx = xy[:, 0].min(), xy[:, 0].max()
         if height:
-            miny, maxy = 1, int(height)
+            miny, maxy = 0, int(height) - 1
         else:
             miny, maxy = xy[:, 1].min(), xy[:, 1].max()
         an_engine.solver_set_field_bounds(solver, minx, maxx, miny, maxy)
