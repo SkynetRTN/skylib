@@ -13,8 +13,8 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, indices, int32, ma, median, nan, nanpercentile,
-    ndarray, percentile as np_percentile)
+    argmax, array, bincount, full, indices, int32, ma, median, nan,
+    nanpercentile, ndarray, percentile as np_percentile)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -185,6 +185,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
             if rejection or any(isinstance(data, ma.MaskedArray)
                                 for data in datacube):
                 datacube = ma.masked_array(datacube)
+                if not datacube.mask.shape:
+                    # No initially masked data, but we'll need an array instead
+                    # of mask=False to do slicing operations
+                    datacube.mask = full(datacube.shape, datacube.mask)
             else:
                 datacube = array(datacube)
 
