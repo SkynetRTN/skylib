@@ -76,9 +76,9 @@ def centroid_iraf(data, x, y, radius=5, tol=0.2, max_iter=10):
 def gauss_ellip(x, y, p):
     x0, y0, baseline, ampl, s1, s2, theta = p
     sn, cs = numpy.sin(theta), numpy.cos(theta)
-    a = (cs/s1)**2 + (sn/s2)**2
-    b = (sn/s1)**2 + (cs/s2)**2
-    c = 2*sn*cs*(1/s1**2 - 1/s2**2)
+    a = cs**2/s1 + sn**2/s2
+    b = sn**2/s1 + cs**2/s2
+    c = 2*sn*cs*(1/s1 - 1/s2)
     dx, dy = x - x0, y - y0
     return baseline + ampl*numpy.exp(-0.5*(a*dx**2 + b*dy**2 + c*dx*dy))
 
@@ -126,15 +126,16 @@ def centroid_psf(data, x, y, radius=5, ftol=1e-4, xtol=1e-4, maxfev=1000):
 
     # Initial guess
     ampl = box.max()
-    sigma = numpy.sqrt((box > ampl/2).sum())/k_gauss
+    sigma2 = (box > ampl/2).sum()/k_gauss**2
 
     # Get centroid position by least-squares fitting
     p = leastsq(
         lambda _p: gauss_ellip(x, y, _p) - box,
-        numpy.array([xc - x1, yc - y1, 0, ampl, sigma, sigma, 0]),
+        numpy.array([xc - x1, yc - y1, 0, ampl, sigma2, sigma2, 0]),
         ftol=ftol, xtol=xtol, maxfev=maxfev)[0]
 
-    a, b, theta = float(p[4]), float(p[5]), float(numpy.rad2deg(p[6]))
+    a, b = float(numpy.sqrt(p[4])), float(numpy.sqrt(p[5]))
+    theta = float(numpy.rad2deg(p[6]))
     if a < b:
         # Make sure a is semi-major axis
         a, b = b, a
