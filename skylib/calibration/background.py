@@ -6,7 +6,9 @@ estimate_background(): extract background and noise map from an image.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import atleast_1d, repeat, where
+from typing import Tuple, Union
+
+from numpy import atleast_1d, ndarray, repeat, where
 from numpy.ma import MaskedArray
 import sep
 
@@ -14,14 +16,14 @@ import sep
 __all__ = ['estimate_background', 'sep_compatible']
 
 
-def sep_compatible(img):
+def sep_compatible(img: Union[ndarray, MaskedArray]) \
+        -> Union[ndarray, MaskedArray]:
     """
     Return data array compatible with SEP
 
-    :param array_like img: input 2D image array
+    :param img: input 2D image array
 
     :return: input array if compatible or its compatible view otherwise
-    :rtype: numpy.ndarray
     """
     # Ensure native byte order
     if not img.dtype.isnative:
@@ -34,7 +36,13 @@ def sep_compatible(img):
     return img
 
 
-def estimate_background(img, size=1/64, filter_size=3, fthresh=0.0):
+def estimate_background(img: Union[ndarray, MaskedArray],
+                        size: Union[int, float, Tuple[int, int],
+                                    Tuple[float, float], Tuple[int, float],
+                                    Tuple[float, int]] = 1/64,
+                        filter_size: Union[int, Tuple[int, int]] = 3,
+                        fthresh: float = 0.0) \
+        -> Union[Tuple[ndarray, ndarray], Tuple[MaskedArray, MaskedArray]]:
     """
     Calculate background and noise maps
 
@@ -52,7 +60,6 @@ def estimate_background(img, size=1/64, filter_size=3, fthresh=0.0):
 
     :return: background and RMS maps as NumPy arrays of the same shape as input;
         for bkg_method="const", these are two scalars
-    :rtype: tuple(array_like, array_like)
     """
     img = sep_compatible(img)
 

@@ -10,11 +10,12 @@ from __future__ import absolute_import, division, print_function
 from typing import Optional, Union
 
 from numpy import (
-    array, clip, empty, full_like, int32, isscalar, log10, ndarray, ndim, ones,
-    pi, zeros)
+    arctan, array, clip, empty, full_like, indices, int32, isscalar, log10,
+    ndarray, ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 import sep
+
 from ..calibration.background import sep_compatible
 
 
@@ -36,7 +37,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         theta_out: Optional[float] = None,
                         k: float = 2.5,
                         k_in: Optional[float] = None,
-                        k_out: Optional[float] = None) -> ndarray:
+                        k_out: Optional[float] = None,
+                        radius: float = 6) -> ndarray:
     """
     Do automatic (Kron-like) or fixed aperture photometry
 
@@ -75,6 +77,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         default: 1.5*`k`
     :param k_out: outer annulus radius in units of isophotal radius;
         default: 2*`k`
+    :param radius: isophotal analysis radius in pixels used for Kron aperture
+        if ellipse parameters (a,b,theta) are missing
 
     :return: record array containing the input sources, with "flux" and
         "flux_err" updated and the following fields added: "mag", "mag_err",
@@ -163,6 +167,45 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
         a, b, theta = sources['a'], sources['b'], sources['theta']
+        bad = (a <= 0) | (b <= 0)
+        if bad.any():
+            # Do isophotal analysis to compute ellipse parameters if missing
+            yy, xx = indices(img.shape)
+            for i in bad.nonzero()[0]:
+                ap = (xx - sources[i]['x'])**2 + (yy - sources[i]['y'])**2 <= \
+                    radius**2
+                if ap.any():
+                    yi, xi = ap.nonzero()
+                    ap_data = img[ap].astype(float)
+                    flux = ap_data.sum()
+                    if flux > 0:
+                        cx = (xi*ap_data).sum()/flux
+                        cy = (yi*ap_data).sum()/flux
+                        x2 = (xi**2*ap_data).sum()/flux - cx**2
+                        y2 = (yi**2*ap_data).sum()/flux - cy**2
+                        xy = (xi*yi*ap_data).sum()/flux - cx*cy
+                    else:
+                        cx, cy = xi.mean(), yi.mean()
+                        x2 = (xi**2).mean() - cx**2
+                        y2 = (yi**2).mean() - cy**2
+                        xy = (xi*yi).mean() - cx*cy
+                    if x2 == y2:
+                        thetai = 0
+                    else:
+                        thetai = arctan(2*xy/(x2 - y2))/2
+                        if x2 > y2:
+                            thetai += pi/2
+                    m1 = (x2 + y2)/2
+                    m2 = sqrt(max((x2 - y2)**2/4 + xy**2, 0))
+                    ai = max(1/12, sqrt(max(m1 + m2, 0)))
+                    bi = max(1/12, sqrt(max(m1 - m2, 0)))
+                else:
+                    # Cannot obtain a,b,theta from isophotal analysis, assume
+                    # circular aperture
+                    ai, bi, thetai = radius, radius, 0
+                a[i] = sources[i]['a'] = ai
+                b[i] = sources[i]['b'] = bi
+                theta[i] = sources[i]['theta'] = thetai
         bad = (a < b).nonzero()
         a[bad], b[bad] = b[bad], a[bad]
         theta[bad] += pi/2

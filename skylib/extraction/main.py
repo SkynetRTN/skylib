@@ -203,6 +203,9 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
     # Make sure that a >= b
     s = sources['a'] < sources['b']
     sources[s]['a'], sources[s]['b'] = sources[s]['b'], sources[s]['a']
+    sources[s]['theta'] += pi/2
+    sources['theta'] %= pi
+    sources[sources['theta'] > pi/2]['theta'] -= pi
 
     # Discard sources with FWHM or ellipticity outside the limits
     if min_fwhm:
