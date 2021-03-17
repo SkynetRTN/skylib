@@ -7,10 +7,12 @@ source extraction functions.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import ceil, isfinite, log, pi, sqrt, zeros
+from typing import Any, Dict, Optional, Tuple, Union
+
+from numpy import ceil, isfinite, ndarray, pi, zeros
 from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
-from astropy.stats import gaussian_fwhm_to_sigma
+from astropy.stats import gaussian_fwhm_to_sigma, gaussian_sigma_to_fwhm
 from astropy.convolution import Gaussian2DKernel, Kernel2D
 from astropy.modeling.models import Gaussian2D
 import sep
@@ -42,7 +44,7 @@ class AsymmetricGaussian2DKernel(Gaussian2DKernel):
     """
     Anisotropic Gaussian 2D filter kernel
     """
-    def __init__(self, x_sigma, y_sigma, theta, **kwargs):
+    def __init__(self, x_sigma: float, y_sigma: float, theta: float, **kwargs):
         """
         Create anisotropic 2D Gaussian kernel
 
@@ -60,10 +62,17 @@ class AsymmetricGaussian2DKernel(Gaussian2DKernel):
         self._truncation = abs(1 - self._array.sum())
 
 
-def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
-                    min_pixels=5, deblend=True, deblend_levels=32,
-                    deblend_contrast=0.005, clean=1.0, centroid=True, gain=None,
-                    sat_img=None):
+def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
+                    bkg_kw: Optional[Dict[str, Any]] = None, fwhm: float = 2.0,
+                    ratio: float = 1, theta: float = 0, min_pixels: int = 5,
+                    min_fwhm: float = 0.8, max_fwhm: float = 10,
+                    max_ellipticity: float = 2, deblend: bool = True,
+                    deblend_levels: int = 32, deblend_contrast: float = 0.005,
+                    clean: Optional[float] = 1.0, centroid: bool = True,
+                    gain: float = None,
+                    sat_img: Optional[Union[ndarray, MaskedArray]] = None) \
+        -> Union[Tuple[ndarray, ndarray, ndarray],
+                 Tuple[MaskedArray, MaskedArray, MaskedArray]]:
     """
     Extract sources from a calibrated (dark- and flat-corrected, etc.) image
     and return a table of their isophotal parameters
@@ -71,43 +80,44 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     This is a wrapper around :func:`sep.extract`, :func:`sep.winpos`, and
     :func:`skylib.calibration.background.estimate_background`.
 
-    :param array_like img: input 2D image array
-    :param float threshold: detection threshold in units of background RMS
-    :param dict bkg_kw: optional keyword arguments to
+    :param img: input 2D image array
+    :param threshold: detection threshold in units of background RMS
+    :param bkg_kw: optional keyword arguments to
         `~skylib.calibration.background.estimate_background()`
-    :param float fwhm: estimated source FWHM in pixels; set to 0 to disable
-        matched filter convolution
-    :param float ratio: minor to major Gaussian kernel axis ratio, 0 < ratio <=
-        1; ignored if `fwhm`=0; `ratio`=1 (default) means circular kernel;
+    :param fwhm: estimated source FWHM in pixels; set to 0 to disable matched
+        filter convolution
+    :param ratio: minor to major Gaussian kernel axis ratio, 0 < ratio <= 1;
+        ignored if `fwhm`=0; `ratio`=1 (default) means circular kernel;
         if `ratio`<1, it is assumed that `fwhm` corresponds to the minor axis
         of the kernel, which makes sense for sources elongated due to bad
         tracking
-    :param float theta: position angle of the Gaussian kernel major axis with
-        respect to the positive X axis, in degrees CCW; ignored if `fwhm`=0
-        or `ratio`=1
-    :param int min_pixels: discard objects with less pixels above threshold
-    :param bool deblend: deblend overlapping sources
-    :param int deblend_levels: number of multi-thresholding levels to use;
+    :param theta: position angle of the Gaussian kernel major axis with respect
+        to the positive X axis, in degrees CCW; ignored if `fwhm`=0 or `ratio`=1
+    :param min_pixels: discard objects with less pixels above threshold
+    :param min_fwhm: discard objects with smaller FWHM in pixels
+    :param max_fwhm: discard objects with larger FWHM in pixels; 0 to disable
+    :param max_ellipticity: discard objects with larger major to minor axis
+        ratio; 0 to disable
+    :param deblend: deblend overlapping sources
+    :param deblend_levels: number of multi-thresholding levels to use;
         ignored if `deblend`=False
-    :param float deblend_contrast: fraction of the total flux to consider a
-        component as a separate object; ignored if `deblend`=False
-    :param float | None clean: if set and non-zero, perform cleaning with the
-        given parameter
-    :param bool centroid: obtain more accurate centroid positions after
-        extraction using the windowed algorithm (SExtractor's XWIN_IMAGE,
-        YWIN_IMAGE)
-    :param float gain: electrons to data units conversion factor; used to
-        estimate photometric errors
-    :param array_like sat_img: optional image with non-zero values indicating
-        saturated pixels; if provided, an extra column `saturated` is added that
-        contains the number of saturated pixels in the source
+    :param deblend_contrast: fraction of the total flux to consider a component
+        as a separate object; ignored if `deblend`=False
+    :param clean: if not None and non-zero, perform cleaning with the given
+        parameter
+    :param centroid: obtain more accurate centroid positions after extraction
+        using the windowed algorithm (SExtractor's XWIN_IMAGE, YWIN_IMAGE)
+    :param gain: electrons to data units conversion factor; used to estimate
+        photometric errors
+    :param sat_img: optional image with non-zero values indicating saturated
+        pixels; if provided, an extra column `saturated` is added that contains
+        the number of saturated pixels in the source
 
     :return:
         record array containing isophotal parameters for each source; see
             :func:`~sep.extract` for a list of fields
         background map array (ADUs), same shape as `img`
         background RMS array (ADUs), same shape as `img`
-    :rtype: tuple(numpy.ndarray, numpy.ndarray, numpy.ndarray)
     """
     threshold = float(threshold)
     if fwhm:
@@ -187,6 +197,20 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
                       isfinite(sources['a']) & isfinite(sources['b']) &
                       isfinite(sources['theta']) & isfinite(sources['flux'])]
+    sources = sources[(sources['a'] > 0) & (sources['b'] > 0) &
+                      (sources['flux'] > 0)]
+
+    # Make sure that a >= b
+    s = sources['a'] < sources['b']
+    sources[s]['a'], sources[s]['b'] = sources[s]['b'], sources[s]['a']
+
+    # Discard sources with FWHM or ellipticity outside the limits
+    if min_fwhm:
+        sources = sources[sources['b'] >= min_fwhm*gaussian_fwhm_to_sigma]
+    if max_fwhm:
+        sources = sources[sources['a'] <= max_fwhm*gaussian_fwhm_to_sigma]
+    if max_ellipticity:
+        sources = sources[sources['a']/sources['b'] <= max_ellipticity]
 
     # Convert ADUs to electrons
     if gain:
@@ -200,6 +224,7 @@ def extract_sources(img, threshold=2.5, bkg_kw=None, fwhm=2.0, ratio=1, theta=0,
     if len(sources) and centroid:
         # Centroid sources using the IRAF-like method
         sources['x'], sources['y'] = centroid_sources(
-            det_img, sources['x'], sources['y'], 4*sqrt(2*log(2))*sources['a'])
+            det_img, sources['x'], sources['y'],
+            2*gaussian_sigma_to_fwhm*sources['a'])
 
     return sources, bkg, rms
