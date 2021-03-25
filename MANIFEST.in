@@ -2,5 +2,6 @@ include MANIFEST.in
 include skylib/astrometry/*.i
 recursive-include skylib/thirdparty/astrometry.net *
 recursive-include skylib/thirdparty/anet_extra *
+include skylib/sonification/*.wav
 prune */.git
 exclude .gitignore

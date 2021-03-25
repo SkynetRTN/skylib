@@ -237,12 +237,15 @@ rcrlib_ext = Extension(
 
 numpy.distutils.core.setup(
     name='SkyLib',
-    version='0.1.3',
-    requires=['numpy', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep', 'astroscrappy'],
+    version='0.2.0',
+    requires=['numpy(>=1.18)', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep(==1.0.3)',
+              'astroscrappy(==1.0.8)'],
+    provides='skylib',
     packages=[
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine',
         'skylib.extraction', 'skylib.io', 'skylib.photometry',
         'skylib.sonification', 'skylib.util'],
     ext_modules=[an_engine_ext, rcrlib_ext],
+    package_data={'skylib.sonification': ['*.wav']},
     scripts=['scripts/fits2wav.py'],
 )

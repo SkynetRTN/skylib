@@ -7,75 +7,93 @@ photometry of an image after source extraction.
 
 from __future__ import absolute_import, division, print_function
 
-from numpy import clip, int32, isscalar, log10, ones, pi, zeros
+from typing import Optional, Union
+
+from numpy import (
+    arctan, array, clip, empty, full_like, indices, int32, isscalar, log10,
+    ndarray, ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 import sep
+
 from ..calibration.background import sep_compatible
 
 
 __all__ = ['aperture_photometry']
 
 
-def aperture_photometry(img, sources, background=None, background_rms=None,
-                        texp=1, gain=1, a=None, b=None, theta=0, a_in=None,
-                        a_out=None, b_out=None, theta_out=None, k=2.5,
-                        k_in=None, k_out=None):
+def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
+                        background: Optional[Union[ndarray,
+                                                   MaskedArray]] = None,
+                        background_rms: Optional[Union[ndarray,
+                                                       MaskedArray]] = None,
+                        texp: float = 1,
+                        gain: Union[float, ndarray, MaskedArray] = 1,
+                        a: Optional[float] = None, b: Optional[float] = None,
+                        theta: Optional[float] = 0,
+                        a_in: Optional[float] = None,
+                        a_out: Optional[float] = None,
+                        b_out: Optional[float] = None,
+                        theta_out: Optional[float] = None,
+                        k: float = 2.5,
+                        k_in: Optional[float] = None,
+                        k_out: Optional[float] = None,
+                        radius: float = 6) -> ndarray:
     """
     Do automatic (Kron-like) or fixed aperture photometry
 
-    :param array_like img: input 2D image array
-    :param array_like sources: record array of sources extracted with
+    :param img: input 2D image array
+    :param sources: record array of sources extracted with
         :func:`skylib.extraction.extract_sources`; the function adds the
         following columns: flux, flux_err, mag, mag_err, aper_a, aper_b,
         aper_theta, aper_a_in, aper_a_out, aper_b_out, aper_theta_out,
         aper_area, background_area, background, background_rms
-    :param array_like background: optional sky background map; if omitted,
-        extract background from the annulus around the aperture, see `a_in`
-        below
-    :param array_like background_rms: optional sky background RMS map; if
-        omitted, calculate RMS over the annulus around the aperture
-    :param float texp: exposure time in seconds
-    :param array_like gain: electrons to data units conversion factor; used to
-        estimate photometric errors; for variable-gain images (e.g. mosaics),
-        must be an array of the same shape as the input data
-    :param float a: fixed aperture radius or semi-major axis in pixels;
-        default: use automatic photometry with a = a_iso*k, where a_iso is the
-        isophotal semi-major axis sigma
-    :param float b: semi-minor axis in pixels when using a fixed aperture;
-        default: same as `a`
-    :param float theta: rotation angle of semi-major axis in degrees CCW when
-        using a fixed aperture and `b` != `a`; default: 0
-    :param float a_in: inner annulus radius or semi-major axis in pixels; used
+    :param background: optional sky background map; if omitted, extract
+        background from the annulus around the aperture, see `a_in` below
+    :param background_rms: optional sky background RMS map; if omitted,
+        calculate RMS over the annulus around the aperture
+    :param texp: exposure time in seconds
+    :param gain: electrons to data units conversion factor; used to estimate
+        photometric errors; for variable-gain images (e.g. mosaics), must be
+        an array of the same shape as the input data
+    :param a: fixed aperture radius or semi-major axis in pixels; default: use
+        automatic photometry with a = a_iso*k, where a_iso is the isophotal
+        semi-major axis sigma
+    :param b: semi-minor axis in pixels when using a fixed aperture; default:
+        same as `a`
+    :param theta: rotation angle of semi-major axis in degrees CCW when using
+        a fixed aperture and `b` != `a`; default: 0
+    :param a_in: inner annulus radius or semi-major axis in pixels; used
         to estimate the background if `background` or `background_rms` are not
         provided, ignored otherwise; default: `a`*`k_in`
-    :param float a_out: outer annulus radius or semi-major axis in pixels;
-        default: `a`*`k_out`
-    :param float b_out: outer annulus semi-minor axis in pixels;
-        default: `b`*`k_out`
-    :param float theta_out: annulus orientation in degrees CCW; default: same
+    :param a_out: outer annulus radius or semi-major axis in pixels; default:
+        `a`*`k_out`
+    :param b_out: outer annulus semi-minor axis in pixels; default: `b`*`k_out`
+    :param theta_out: annulus orientation in degrees CCW; default: same
         as `theta`
-    :param float k: automatic aperture radius in units of isophotal radius;
+    :param k: automatic aperture radius in units of isophotal radius;
         default: 2.5
-    :param float k_in: inner annulus radius in units of isophotal radius;
+    :param k_in: inner annulus radius in units of isophotal radius;
         default: 1.5*`k`
-    :param float k_out: outer annulus radius in units of isophotal radius;
+    :param k_out: outer annulus radius in units of isophotal radius;
         default: 2*`k`
+    :param radius: isophotal analysis radius in pixels used for Kron aperture
+        if ellipse parameters (a,b,theta) are missing
 
     :return: record array containing the input sources, with "flux" and
         "flux_err" updated and the following fields added: "mag", "mag_err",
         "aper_a", "aper_b", "aper_theta", "aper_a_in", "aper_a_out",
         "aper_b_out", "aper_theta_out", "aper_area", "background_area",
         "background", "background_rms", "phot_flag"
-    :rtype: numpy.ndarray
     """
     if not len(sources):
-        return
+        return array([])
 
     img = sep_compatible(img)
 
     texp = float(texp)
-    gain = float(gain)
+    if isscalar(gain):
+        gain = float(gain)
     k = float(k)
     if k_in:
         k_in = float(k_in)
@@ -149,6 +167,45 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
         a, b, theta = sources['a'], sources['b'], sources['theta']
+        bad = (a <= 0) | (b <= 0)
+        if bad.any():
+            # Do isophotal analysis to compute ellipse parameters if missing
+            yy, xx = indices(img.shape)
+            for i in bad.nonzero()[0]:
+                ap = (xx - sources[i]['x'])**2 + (yy - sources[i]['y'])**2 <= \
+                    radius**2
+                if ap.any():
+                    yi, xi = ap.nonzero()
+                    ap_data = img[ap].astype(float)
+                    flux = ap_data.sum()
+                    if flux > 0:
+                        cx = (xi*ap_data).sum()/flux
+                        cy = (yi*ap_data).sum()/flux
+                        x2 = (xi**2*ap_data).sum()/flux - cx**2
+                        y2 = (yi**2*ap_data).sum()/flux - cy**2
+                        xy = (xi*yi*ap_data).sum()/flux - cx*cy
+                    else:
+                        cx, cy = xi.mean(), yi.mean()
+                        x2 = (xi**2).mean() - cx**2
+                        y2 = (yi**2).mean() - cy**2
+                        xy = (xi*yi).mean() - cx*cy
+                    if x2 == y2:
+                        thetai = 0
+                    else:
+                        thetai = arctan(2*xy/(x2 - y2))/2
+                        if x2 > y2:
+                            thetai += pi/2
+                    m1 = (x2 + y2)/2
+                    m2 = sqrt(max((x2 - y2)**2/4 + xy**2, 0))
+                    ai = max(1/12, sqrt(max(m1 + m2, 0)))
+                    bi = max(1/12, sqrt(max(m1 - m2, 0)))
+                else:
+                    # Cannot obtain a,b,theta from isophotal analysis, assume
+                    # circular aperture
+                    ai, bi, thetai = radius, radius, 0
+                a[i] = sources[i]['a'] = ai
+                b[i] = sources[i]['b'] = bi
+                theta[i] = sources[i]['theta'] = thetai
         bad = (a < b).nonzero()
         a[bad], b[bad] = b[bad], a[bad]
         theta[bad] += pi/2
@@ -171,12 +228,10 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
             bk_mean, bk_sigma = sep.sum_circle(
                 background, x, y, a, mask=mask, subpix=0)[:2]
         else:
-            # noinspection PyArgumentList
             bk_area = sep.sum_ellipse(
-                area_img, x, y, a, b, theta, mask=mask, subpix=0)[0]
-            # noinspection PyArgumentList
+                area_img, x, y, a, b, theta, 1, mask=mask, subpix=0)[0]
             bk_mean, bk_sigma = sep.sum_ellipse(
-                background, x, y, a, b, theta, mask=mask, subpix=0)[:2]
+                background, x, y, a, b, theta, 1, mask=mask, subpix=0)[:2]
         error = background_rms
     elif fixed_aper and a_out == b_out:
         bk_area = sep.sum_circann(
@@ -198,58 +253,43 @@ def aperture_photometry(img, sources, background=None, background_rms=None,
     elif fixed_aper and a == b:
         area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
     else:
-        # noinspection PyArgumentList
         area = sep.sum_ellipse(
-            area_img, x, y, a, b, theta, mask=mask, subpix=0)[0]
-
-    if not have_background:
-        # We have a single error value per source; compute flux separately
-        # for each source since SEP does not accept a 1D array of errors
-        n = len(sources)
-        flux, flux_err = zeros([2, n], dtype=float)
-        flags = zeros(n, dtype=int)
-    else:
-        # We have a 2D error array; compute all fluxes at once
-        flux = flux_err = flags = None
+            area_img, x, y, a, b, theta, 1, mask=mask, subpix=0)[0]
 
     if fixed_aper and a == b:
         # Fixed circular aperture
-        if have_background:
-            flux, flux_err, flags = sep.sum_circle(
-                img, x, y, a, err=error, mask=mask, gain=gain, subpix=0)
-        else:
+        if ndim(error) == 1:
+            # Separate scalar error for each source
+            flux, flux_err = empty([2, len(sources)], dtype=float)
+            flags = empty(len(sources), dtype=int)
             for i, (_x, _y, _err) in enumerate(zip(x, y, error)):
                 flux[i], flux_err[i], flags[i] = sep.sum_circle(
-                    img, _x, _y, a, err=_err, mask=mask, gain=gain, subpix=0)
+                    img, [_x], [_y], a, err=_err, mask=mask, gain=gain,
+                    subpix=0)
+        else:
+            flux, flux_err, flags = sep.sum_circle(
+                img, x, y, a, err=error, mask=mask, gain=gain, subpix=0)
     else:
         # Variable or elliptic aperture
-        if have_background:
-            # noinspection PyArgumentList
-            flux, flux_err, flags = sep.sum_ellipse(
-                img, x, y, a, b, theta, err=error, mask=mask, gain=gain,
-                subpix=0)
+        if ndim(error) == 1:
+            # Separate scalar error for each source
+            flux, flux_err = empty([2, len(sources)], dtype=float)
+            flags = empty(len(sources), dtype=int)
+            if isscalar(a):
+                a = full_like(x, a)
+            if isscalar(b):
+                b = full_like(x, b)
+            if isscalar(theta):
+                theta = full_like(x, theta)
+            for i, (_x, _y, _err, _a, _b, _theta) in enumerate(zip(
+                    x, y, error, a, b, theta)):
+                flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
+                    img, [_x], [_y], _a, _b, _theta, 1, err=_err, mask=mask,
+                    gain=gain, subpix=0)
         else:
-            if all(isscalar(item) for item in (a, b, theta)):
-                # Same aperture for all sources
-                for i, (_x, _y, _err) in enumerate(zip(x, y, error)):
-                    # noinspection PyArgumentList
-                    flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
-                        img, _x, _y, a, b, theta, err=_err, mask=mask,
-                        gain=gain, subpix=0)
-            else:
-                # Individual aperture for each source
-                if isscalar(a):
-                    a = zeros(len(sources)) + a
-                if isscalar(b):
-                    b = zeros(len(sources)) + b
-                if isscalar(theta):
-                    theta = zeros(len(sources)) + theta
-                for i, (_x, _y, _a, _b, _theta, _err) in enumerate(
-                        zip(x, y, a, b, theta, error)):
-                    # noinspection PyArgumentList
-                    flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
-                        img, _x, _y, _a, _b, _theta, err=_err, mask=mask,
-                        gain=gain, subpix=0)
+            flux, flux_err, flags = sep.sum_ellipse(
+                img, x, y, a, b, theta, 1, err=error, mask=mask, gain=gain,
+                subpix=0)
 
     # Convert background sum to mean and subtract background from fluxes
     if have_background:
