@@ -255,7 +255,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 elongation = weighted_median(elongation, flux)
             if fix_rot:
                 theta = weighted_median(theta, flux, period=pi)
-                theta[theta > pi/2] -= pi
+                if theta > pi/2:
+                    theta -= pi
 
         a, b = r*elongation, r/elongation
         if not have_background:
