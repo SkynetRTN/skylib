@@ -5,8 +5,6 @@ High-level aperture photometry interface.
 photometry of an image after source extraction.
 """
 
-from __future__ import absolute_import, division, print_function
-
 from typing import Optional, Union
 
 from numpy import (
@@ -17,6 +15,7 @@ from numpy.ma import MaskedArray
 import sep
 
 from ..calibration.background import sep_compatible
+from ..util.stats import weighted_median
 
 
 __all__ = ['aperture_photometry']
@@ -38,16 +37,17 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         k: float = 2.5,
                         k_in: Optional[float] = None,
                         k_out: Optional[float] = None,
-                        radius: float = 6) -> ndarray:
+                        radius: float = 6,
+                        fix_aper: bool = True,
+                        fix_ell: bool = True,
+                        fix_rot: bool = True) -> ndarray:
     """
     Do automatic (Kron-like) or fixed aperture photometry
 
     :param img: input 2D image array
     :param sources: record array of sources extracted with
-        :func:`skylib.extraction.extract_sources`; the function adds the
-        following columns: flux, flux_err, mag, mag_err, aper_a, aper_b,
-        aper_theta, aper_a_in, aper_a_out, aper_b_out, aper_theta_out,
-        aper_area, background_area, background, background_rms
+        :func:`skylib.extraction.extract_sources`; should contain at least "x"
+        and "y" columns
     :param background: optional sky background map; if omitted, extract
         background from the annulus around the aperture, see `a_in` below
     :param background_rms: optional sky background RMS map; if omitted,
@@ -79,12 +79,21 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         default: 2*`k`
     :param radius: isophotal analysis radius in pixels used for Kron aperture
         if ellipse parameters (a,b,theta) are missing
+    :param fix_aper: use the same aperture radius for all sources when doing
+        automatic photometry; calculated as flux-weighted median of apertures
+        based on Kron radius
+    :param fix_ell: use the same major to minor aperture axis ratio for all
+        sources during automatic photometry; calculated as flux-weighted median
+        of all ellipticities
+    :param fix_rot: use the same aperture position angle for all sources during
+        automatic photometry; calculated as flux-weighted median
+        of all orientations
 
-    :return: record array containing the input sources, with "flux" and
-        "flux_err" updated and the following fields added: "mag", "mag_err",
-        "aper_a", "aper_b", "aper_theta", "aper_a_in", "aper_a_out",
-        "aper_b_out", "aper_theta_out", "aper_area", "background_area",
-        "background", "background_rms", "phot_flag"
+    :return: record array containing the input sources, with the following
+        fields added or updated: "flux", "flux_err", "mag", "mag_err", "aper_a",
+        "aper_b", "aper_theta", "aper_a_in", "aper_a_out", "aper_b_out",
+        "aper_theta_out", "aper_area", "background_area", "background",
+        "background_rms", "phot_flag"
     """
     if not len(sources):
         return array([])
@@ -130,6 +139,9 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 mask |= background_rms.mask
             background_rms = background_rms.data
 
+    # Will need this to fill the newly added source table columns
+    z = zeros(len(sources), float)
+
     fixed_aper = bool(a)
     if fixed_aper:
         # Use the same fixed aperture and annulus parameters for all sources
@@ -166,6 +178,9 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 b_out = a_out*b/a
     else:
         # Use automatic apertures derived from kron radius and ellipse axes
+        for name in ['a', 'b', 'theta']:
+            if name not in sources.dtype.names:
+                sources = append_fields(sources, name, z, usemask=False)
         a, b, theta = sources['a'], sources['b'], sources['theta']
         bad = (a <= 0) | (b <= 0)
         if bad.any():
@@ -210,12 +225,38 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         a[bad], b[bad] = b[bad], a[bad]
         theta[bad] += pi/2
         theta %= pi
-        theta[(theta > pi/2).nonzero()] -= pi
+        theta[theta > pi/2] -= pi
         kron_r = clip(
             sep.kron_radius(img, x, y, a, b, theta, 6.0, mask=mask)[0],
             0.1, None)
         r = kron_r*k
         elongation = a/b
+
+        if r.size > 1 and any([fix_aper, fix_ell, fix_rot]):
+            # Need fluxes to compute weighted median(s)
+            if 'flux' in sources.dtype.names and (sources['flux'] > 0).any():
+                flux = sources['flux']
+            else:
+                # Run a preliminary fixed-aperture photometry pass to compute
+                # fluxes if missing from input data
+                flux = aperture_photometry(
+                    img, sources, background=background,
+                    background_rms=background_rms, texp=texp, gain=gain,
+                    a=radius, a_in=radius*k_in/k, a_out=radius*k_out/k)['flux']
+            flux[flux < 0] = 0
+            if not flux.any():
+                raise ValueError(
+                    'Not enough data for weighted median in fixed-aperture '
+                    'automatic photometry; use static fixed-aperture or fully '
+                    'adaptive automatic photometry instead')
+            if fix_aper:
+                r = weighted_median(r, flux)
+            if fix_ell:
+                elongation = weighted_median(elongation, flux)
+            if fix_rot:
+                theta = weighted_median(theta, flux, period=pi)
+                theta[theta > pi/2] -= pi
+
         a, b = r*elongation, r/elongation
         if not have_background:
             a_in = a*(k_in/k)
@@ -307,15 +348,27 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     bk_mean *= gain
     bk_sigma *= gain
 
-    sources['flux'] = flux
-    sources['flag'] |= flags
+    if 'flux' in sources.dtype.names:
+        sources['flux'] = flux
+    else:
+        sources = append_fields(sources, 'flux', flux, usemask=False)
 
-    sources = append_fields(
-        sources,
-        ['flux_err', 'mag', 'mag_err', 'aper_a', 'aper_b', 'aper_theta',
-         'aper_a_in', 'aper_a_out', 'aper_b_out', 'aper_theta_out', 'aper_area',
-         'background_area', 'background', 'background_rms'],
-        [flux_err] + [zeros(len(sources), float)]*13, usemask=False)
+    if 'flux_err' in sources.dtype.names:
+        sources['flux_err'] = flux_err
+    else:
+        sources = append_fields(sources, 'flux_err', flux_err, usemask=False)
+
+    if 'flag' in sources.dtype.names:
+        sources['flag'] |= flags
+    else:
+        sources = append_fields(sources, 'flag', flags, usemask=False)
+
+    for name in ['mag', 'mag_err', 'aper_a', 'aper_b', 'aper_theta',
+                 'aper_a_in', 'aper_a_out', 'aper_b_out', 'aper_theta_out',
+                 'aper_area', 'background_area', 'background',
+                 'background_rms']:
+        if name not in sources.dtype.names:
+            sources = append_fields(sources, name, z, usemask=False)
 
     good = (flux > 0).nonzero()
     if len(good[0]):
