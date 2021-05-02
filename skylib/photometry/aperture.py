@@ -208,7 +208,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         thetai = 0
                     else:
                         thetai = arctan(2*xy/(x2 - y2))/2
-                        if x2 > y2:
+                        if y2 > x2:
                             thetai += pi/2
                     m1 = (x2 + y2)/2
                     m2 = sqrt(max((x2 - y2)**2/4 + xy**2, 0))
