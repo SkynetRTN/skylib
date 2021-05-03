@@ -38,7 +38,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         k_in: Optional[float] = None,
                         k_out: Optional[float] = None,
                         radius: float = 6,
-                        fix_aper: bool = True,
+                        fix_aper: bool = False,
                         fix_ell: bool = True,
                         fix_rot: bool = True) -> ndarray:
     """
