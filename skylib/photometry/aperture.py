@@ -14,7 +14,7 @@ from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 import sep
 
-from ..calibration.background import sep_compatible
+from ..calibration.background import estimate_background, sep_compatible
 from ..util.stats import weighted_median
 
 
@@ -177,7 +177,13 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             else:
                 b_out = a_out*b/a
     else:
-        # Use automatic apertures derived from kron radius and ellipse axes
+        # Use automatic apertures derived from Kron radius and ellipse axes
+        # Will need image with background subtracted
+        if background is None:
+            # Estimate background on the fly
+            img_back = img - estimate_background(img)[0]
+        else:
+            img_back = img - background
         for name in ['a', 'b', 'theta']:
             if name not in sources.dtype.names:
                 sources = append_fields(sources, name, z, usemask=False)
@@ -191,7 +197,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                     radius**2
                 if ap.any():
                     yi, xi = ap.nonzero()
-                    ap_data = img[ap].astype(float)
+                    ap_data = img_back[ap].astype(float)
                     flux = ap_data.sum()
                     if flux > 0:
                         cx = (xi*ap_data).sum()/flux
@@ -227,7 +233,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         theta %= pi
         theta[theta > pi/2] -= pi
         kron_r = clip(
-            sep.kron_radius(img, x, y, a, b, theta, 6.0, mask=mask)[0],
+            sep.kron_radius(img_back, x, y, a, b, theta, 6.0, mask=mask)[0],
             0.1, None)
         r = kron_r*k
         elongation = a/b
