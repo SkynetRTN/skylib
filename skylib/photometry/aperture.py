@@ -1,15 +1,15 @@
 """
 High-level aperture photometry interface.
 
-:func:`~aperture_photometry()`: fixed or automatic (Kron-like) aperture
-photometry of an image after source extraction.
+:func:`~aperture_photometry()`: fixed or automatic aperture photometry
+of an image after source extraction.
 """
 
 from typing import Optional, Union
 
 from numpy import (
-    arctan, array, clip, empty, full_like, indices, int32, isscalar, log10,
-    ndarray, ndim, ones, pi, sqrt, zeros)
+    arctan, array, empty, full_like, indices, int32, isscalar, log10, ndarray,
+    ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 import sep
@@ -42,7 +42,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         fix_ell: bool = True,
                         fix_rot: bool = True) -> ndarray:
     """
-    Do automatic (Kron-like) or fixed aperture photometry
+    Do automatic or fixed aperture photometry
 
     :param img: input 2D image array
     :param sources: record array of sources extracted with
@@ -77,11 +77,11 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         default: 1.5*`k`
     :param k_out: outer annulus radius in units of isophotal radius;
         default: 2*`k`
-    :param radius: isophotal analysis radius in pixels used for Kron aperture
-        if ellipse parameters (a,b,theta) are missing
+    :param radius: isophotal analysis radius in pixels used to compute automatic
+        aperture if ellipse parameters (a,b,theta) are missing
     :param fix_aper: use the same aperture radius for all sources when doing
-        automatic photometry; calculated as flux-weighted median of apertures
-        based on Kron radius
+        automatic photometry; calculated as flux-weighted median of aperture
+        sizes based on isophotal parameters
     :param fix_ell: use the same major to minor aperture axis ratio for all
         sources during automatic photometry; calculated as flux-weighted median
         of all ellipticities
@@ -177,11 +177,11 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             else:
                 b_out = a_out*b/a
     else:
-        # Use automatic apertures derived from Kron radius and ellipse axes
+        # Use automatic apertures derived from ellipse axes
         # Will need image with background subtracted
         if background is None:
             # Estimate background on the fly
-            img_back = img - estimate_background(img)[0]
+            img_back = img - estimate_background(img, size=64)[0]
         else:
             img_back = img - background
         for name in ['a', 'b', 'theta']:
@@ -220,6 +220,10 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                     m2 = sqrt(max((x2 - y2)**2/4 + xy**2, 0))
                     ai = max(1/12, sqrt(max(m1 + m2, 0)))
                     bi = max(1/12, sqrt(max(m1 - m2, 0)))
+                    if ai/bi > 2:
+                        # Prevent too elongated apertures usually occurring for
+                        # faint objects
+                        bi = ai
                 else:
                     # Cannot obtain a,b,theta from isophotal analysis, assume
                     # circular aperture
@@ -232,10 +236,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         theta[bad] += pi/2
         theta %= pi
         theta[theta > pi/2] -= pi
-        kron_r = clip(
-            sep.kron_radius(img_back, x, y, a, b, theta, 6.0, mask=mask)[0],
-            0.1, None)
-        r = kron_r*k
+        r = sqrt(a*b)*k
         elongation = a/b
 
         if r.size > 1 and any([fix_aper, fix_ell, fix_rot]):
@@ -264,7 +265,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 if theta > pi/2:
                     theta -= pi
 
-        a, b = r*elongation, r/elongation
+        sqrt_el = sqrt(elongation)
+        a, b = r*sqrt_el, r/sqrt_el
         if not have_background:
             a_in = a*(k_in/k)
             a_out, b_out = a*(k_out/k), b*(k_out/k)
