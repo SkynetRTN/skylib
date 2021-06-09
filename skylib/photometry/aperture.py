@@ -71,7 +71,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         radius: float = 6,
                         fix_aper: bool = False,
                         fix_ell: bool = True,
-                        fix_rot: bool = True) -> ndarray:
+                        fix_rot: bool = True,
+                        apcorr_tol: float = 0.0001) -> ndarray:
     """
     Do automatic or fixed aperture photometry
 
@@ -92,7 +93,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         correction
     :param a: fixed aperture radius or semi-major axis in pixels; default: use
         automatic photometry with a = a_iso*k, where a_iso is the isophotal
-        semi-major axis sigma
+        semi-major axis
     :param b: semi-minor axis in pixels when using a fixed aperture; default:
         same as `a`
     :param theta: rotation angle of semi-major axis in degrees CCW when using
@@ -107,10 +108,12 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         as `theta`
     :param k: automatic aperture radius in units of isophotal radius; 0 means
         find the optimal radius based on SNR; default: 0
-    :param k_in: inner annulus radius in units of isophotal radius;
+    :param k_in: inner annulus radius in units of aperture radius (fixed
+        aperture, i.e. `a` is provided) or isophotal radius (adaptive aperture);
         default: 1.5*`k` or 3.75 if `k` is undefined and `a` = None
-    :param k_out: outer annulus radius in units of isophotal radius;
-        default: 2*`k` or 5 if `k` is undefined and `a` = None
+    :param k_out: outer annulus radius in units of aperture radius (fixed
+        aperture) or isophotal radius (adaptive aperture); default: 2*`k` or
+        5 if `k` is undefined and `a` = None
     :param radius: isophotal analysis radius in pixels used to compute automatic
         aperture if ellipse parameters (a,b,theta) are missing
     :param fix_aper: use the same aperture radius for all sources when doing
@@ -122,6 +125,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     :param fix_rot: use the same aperture position angle for all sources during
         automatic photometry; calculated as flux-weighted median
         of all orientations
+    :param apcorr_tol: growth curve stopping tolerance for aperture correction;
+        0 = disable aperture correction
 
     :return: record array containing the input sources, with the following
         fields added or updated: "flux", "flux_err", "mag", "mag_err", "aper_a",
@@ -421,106 +426,109 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     # Calculate aperture correction for all aperture sizes from the brightest
     # source
     aper_corr = {}
-    for i in argsort(flux)[::-1]:
-        xi, yi = x[i], y[i]
-        if isscalar(a):
-            ai = a
-        else:
-            ai = a[i]
-        if isscalar(b):
-            bi = b
-        else:
-            bi = b[i]
-        if isscalar(theta):
-            thetai = theta
-        else:
-            thetai = theta[i]
-        if ndim(error) == 1:
-            err = error[i]
-        else:
-            err = error
-
-        if ai == bi:
-            nsat = sep.sum_circle(
-                img >= sat_level, [xi], [yi], ai, subpix=0)[0][0]
-        else:
-            nsat = sep.sum_ellipse(
-                img >= sat_level, [xi], [yi], ai, bi, thetai, 1, subpix=0)[0][0]
-        if nsat:
-            # Saturated source
-            continue
-
-        # Obtain total flux by increasing aperture size until it grows either
-        # more than before (i.e. a nearby source in the aperture) or less than
-        # the threshold (i.e. the growth curve reached saturation)
-        f0 = f_prev = flux[i]
-        dap = 0
-        f_tot = df_prev = None
-        while True:
-            dap += 0.1
-            if ai == bi:
-                f, f_err, fl = sep.sum_circle(
-                    img, [xi], [yi], ai + dap, err=err, mask=mask, gain=gain,
-                    subpix=0)
-                area_i = sep.sum_circle(
-                    area_img, [xi], [yi], ai + dap, mask=mask, subpix=0)[0][0]
+    if apcorr_tol > 0:
+        for i in argsort(flux)[::-1]:
+            xi, yi = x[i], y[i]
+            if isscalar(a):
+                ai = a
             else:
-                f, f_err, fl = sep.sum_ellipse(
-                    img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1,
-                    err=err, mask=mask, gain=gain, subpix=0)
-                area_i = sep.sum_ellipse(
-                    area_img, [xi], [yi], ai + dap, bi + dap, thetai, 1,
-                    mask=mask, subpix=0)[0][0]
-            f, fl = f[0], fl[0]
-            if fl:
-                break
-            f = (f - bk_mean[i]*area_i)*gain
-            if f <= 0:
-                break
-            df = f/f_prev
-            if df_prev is not None and df > df_prev:
-                # Increasing growth, nearby source hit
-                f_tot = f_prev
-                break
-            if df < 1.0001:
-                # Growth stopped to within the tolerance
-                f_tot = f
-                break
-            f_prev, df_prev = f, df
-        if f_tot is None:
-            continue
+                ai = a[i]
+            if isscalar(b):
+                bi = b
+            else:
+                bi = b[i]
+            if isscalar(theta):
+                thetai = theta
+            else:
+                thetai = theta[i]
+            if ndim(error) == 1:
+                err = error[i]
+            else:
+                err = error
 
-        # Calculate fluxes for the chosen source for all unique aperture sizes
-        # used for other sources
-        fluxes_for_ap = {ai: f0}
-        if not isscalar(a):
-            for aj in set(a) - {ai}:
-                bj = aj*bi/ai
-                if aj == bj:
-                    f, fl = sep.sum_circle(
-                        img, [xi], [yi], aj, err=err, mask=mask, gain=gain,
-                        subpix=0)[::2]
-                    area_j = sep.sum_circle(
-                        area_img, [xi], [yi], aj, mask=mask, subpix=0)[0][0]
+            if ai == bi:
+                nsat = sep.sum_circle(
+                    img >= sat_level, [xi], [yi], ai, subpix=0)[0][0]
+            else:
+                nsat = sep.sum_ellipse(
+                    img >= sat_level, [xi], [yi], ai, bi, thetai, 1,
+                    subpix=0)[0][0]
+            if nsat:
+                # Saturated source
+                continue
+
+            # Obtain total flux by increasing aperture size until it grows
+            # either more than before (i.e. a nearby source in the aperture) or
+            # less than the threshold (i.e. the growth curve reached saturation)
+            f0 = f_prev = flux[i]
+            dap = 0
+            f_tot = df_prev = None
+            while True:
+                dap += 0.1
+                if ai == bi:
+                    f, f_err, fl = sep.sum_circle(
+                        img, [xi], [yi], ai + dap, err=err, mask=mask,
+                        gain=gain, subpix=0)
+                    area_i = sep.sum_circle(
+                        area_img, [xi], [yi], ai + dap, mask=mask,
+                        subpix=0)[0][0]
                 else:
-                    f, fl = sep.sum_ellipse(
-                        img, [xi], [yi], aj, bj, thetai, 1, err=err,
-                        mask=mask, gain=gain, subpix=0)[::2]
-                    area_j = sep.sum_ellipse(
-                        area_img, [xi], [yi], aj, bj, thetai, 1,
+                    f, f_err, fl = sep.sum_ellipse(
+                        img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1,
+                        err=err, mask=mask, gain=gain, subpix=0)
+                    area_i = sep.sum_ellipse(
+                        area_img, [xi], [yi], ai + dap, bi + dap, thetai, 1,
                         mask=mask, subpix=0)[0][0]
                 f, fl = f[0], fl[0]
-                f = (f - bk_mean[i]*area_j)*gain
-                if fl or f <= 0:
-                    continue
-                fluxes_for_ap[aj] = f
+                if fl:
+                    break
+                f = (f - bk_mean[i]*area_i)*gain
+                if f <= 0:
+                    break
+                df = f/f_prev
+                if df_prev is not None and df > df_prev:
+                    # Increasing growth, nearby source hit
+                    f_tot = f_prev
+                    break
+                if df < 1 + apcorr_tol:
+                    # Growth stopped to within the tolerance
+                    f_tot = f
+                    break
+                f_prev, df_prev = f, df
+            if f_tot is None:
+                continue
 
-        # Calculate aperture corrections
-        for aj, f in fluxes_for_ap.items():
-            if f < f_tot:
-                aper_corr[aj] = -2.5*log10(f_tot/f)
+            # Calculate fluxes for the chosen source for all unique aperture
+            # sizes used for other sources
+            fluxes_for_ap = {ai: f0}
+            if not isscalar(a):
+                for aj in set(a) - {ai}:
+                    bj = aj*bi/ai
+                    if aj == bj:
+                        f, fl = sep.sum_circle(
+                            img, [xi], [yi], aj, err=err, mask=mask, gain=gain,
+                            subpix=0)[::2]
+                        area_j = sep.sum_circle(
+                            area_img, [xi], [yi], aj, mask=mask, subpix=0)[0][0]
+                    else:
+                        f, fl = sep.sum_ellipse(
+                            img, [xi], [yi], aj, bj, thetai, 1, err=err,
+                            mask=mask, gain=gain, subpix=0)[::2]
+                        area_j = sep.sum_ellipse(
+                            area_img, [xi], [yi], aj, bj, thetai, 1,
+                            mask=mask, subpix=0)[0][0]
+                    f, fl = f[0], fl[0]
+                    f = (f - bk_mean[i]*area_j)*gain
+                    if fl or f <= 0:
+                        continue
+                    fluxes_for_ap[aj] = f
 
-        break
+            # Calculate aperture corrections
+            for aj, f in fluxes_for_ap.items():
+                if f < f_tot:
+                    aper_corr[aj] = -2.5*log10(f_tot/f)
+
+            break
 
     if 'flux' in sources.dtype.names:
         sources['flux'] = flux
