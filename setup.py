@@ -164,9 +164,9 @@ an_engine_ext = Extension(
                 for f in (
                     'dualtree', 'dualtree_nearestneighbour',
                     'dualtree_rangesearch', 'kdint_ddd', 'kdint_dds',
-                    'kdint_ddu', 'kdint_dss', 'kdint_duu',
-                    'kdint_fff', 'kdtree', 'kdtree_dim',
-                    'kdtree_fits_io', 'kdtree_mem')],
+                    'kdint_ddu', 'kdint_dss', 'kdint_duu', 'kdint_fff',
+                    'kdint_lll', 'kdtree', 'kdtree_dim', 'kdtree_fits_io',
+                    'kdtree_mem')],
             include_dirs=[anet + fn
                           for fn in ('include', 'include/astrometry',
                                      'qfits-an', 'util')] + [extra + 'anet'],
@@ -207,6 +207,7 @@ if ccompiler == 'mingw32':
             libdef.setdefault('extra_compiler_args', [])
             libdef['extra_compiler_args'] += [
                 '-include', extra + 'qfits-an/qfits-an-sys-stat.h',
+                '-D_POSIX_THREAD_SAFE_FUNCTIONS',  # No localtime_r()
             ]
     an_engine_ext.libraries += [
         ('posix', dict(
@@ -222,9 +223,7 @@ if ccompiler == 'mingw32':
     ]
     an_engine_ext.include_dirs += [extra, extra + 'regex', extra + 'endian']
     an_engine_ext.extra_compile_args += ['-include', extra + 'an-defs.h']
-    an_engine_ext.define_macros += [
-        ('_POSIX', None),
-    ]
+    an_engine_ext.define_macros += [('_POSIX', None)]
 elif ccompiler == 'cygwin':
     # Cygwin does not define __int64
     an_engine_ext.define_macros += [('__int64', 'long long')]
