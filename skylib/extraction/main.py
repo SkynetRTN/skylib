@@ -70,7 +70,8 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
                     deblend_levels: int = 32, deblend_contrast: float = 0.005,
                     clean: Optional[float] = 1.0, centroid: bool = True,
                     gain: float = None,
-                    sat_img: Optional[Union[ndarray, MaskedArray]] = None) \
+                    sat_img: Optional[Union[ndarray, MaskedArray]] = None,
+                    discard_saturated: int = 0) \
         -> Union[Tuple[ndarray, ndarray, ndarray],
                  Tuple[MaskedArray, MaskedArray, MaskedArray]]:
     """
@@ -112,6 +113,8 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
     :param sat_img: optional image with non-zero values indicating saturated
         pixels; if provided, an extra column `saturated` is added that contains
         the number of saturated pixels in the source
+    :param discard_saturated: if > 0 and `sat_img` is provided, discard sources
+        with at least the given number of saturated pixels
 
     :return:
         record array containing isophotal parameters for each source; see
@@ -199,6 +202,10 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
                       isfinite(sources['theta']) & isfinite(sources['flux'])]
     sources = sources[(sources['a'] > 0) & (sources['b'] > 0) &
                       (sources['flux'] > 0)]
+
+    # Discard saturated sources if requested
+    if sat_img is not None and discard_saturated > 0:
+        sources = sources[sources['saturated'] < discard_saturated]
 
     # Make sure that a >= b
     s = sources['a'] < sources['b']
