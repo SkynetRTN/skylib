@@ -83,11 +83,11 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
         defaulting to 0.5
     :param float contrast: for ``stretch`` == "contrast", the contrast
         parameter, defaulting to 1
-    :param str cmap: optional matplotlib colormap name, defaulting to grayscale;
-        when a non-grayscale colormap is specified, the conversion is always
-        done by matplotlib, regardless of the availability of Pillow; see
-        http://matplotlib.org/users/colormaps.html for more info on matplotlib
-        colormaps and
+    :param str cmap: optional matplotlib colormap name, defaulting
+        to grayscale; when a non-grayscale colormap is specified,
+        the conversion is always done by matplotlib, regardless of the
+        availability of Pillow; see https://matplotlib.org/users/colormaps.html
+        for more info on matplotlib colormaps and
             [name for name in matplotlib.cd.cmap_d.keys()
              if not name.endswith('_r')]
         to list the available colormap names
@@ -127,7 +127,6 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             raise ValueError(
                 'Upper clipping percentile must be greater or equal to '
                 'lower percentile')
-        # noinspection PyTypeChecker
         lo, hi = percentile(data, [lo, hi])
     elif norm == 'zscale':
         if lo is None:
@@ -140,7 +139,6 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             nsamples, zcontrast, hi, lo, krej, max_iterations).get_limits(data)
     else:
         raise ValueError('Unknown normalization mode "{}"'.format(norm))
-    # noinspection PyTypeChecker
     data = clip((data - lo)/(hi - lo), 0, 1)
 
     # Stretch the data
@@ -185,7 +183,7 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             cmap = 'gray'
         if cmap == 'gray':
             try:
-                # noinspection PyPackageRequirements
+                # noinspection PyPackageRequirements,PyPep8Naming
                 from PIL import Image as pil_image
             except ImportError:
                 pil_image = None
@@ -196,9 +194,9 @@ def get_image(data, fmt='JPEG', norm='percentile', lo=None, hi=None,
             # Use Pillow for grayscale output if available; flip the image to
             # match the bottom-to-top FITS convention and convert from [0,1] to
             # unsigned byte
-            pil_image.frombuffer(
-                'L', data.shape[::-1], (data[::-1]*255 + 0.5).astype(uint8),
-                'raw', 'L', 0, 1).save(buf, fmt, dpi=(dpi,)*2, **kwargs)
+            pil_image.fromarray(
+                (data[::-1]*255 + 0.5).astype(uint8),
+            ).save(buf, fmt, dpi=(dpi, dpi), **kwargs)
         else:
             # Use matplotlib for non-grayscale colormaps or if PIL is not
             # available
