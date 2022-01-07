@@ -11,8 +11,8 @@ import os
 import wave
 
 from numpy import (
-    arange, array, ceil, cos, indices, int16, ma, percentile, pi, sin, sqrt,
-    outer, zeros)
+    arange, array, ceil, cos, indices, int16, ma, nan, nanpercentile,
+    percentile, pi, sin, sqrt, outer, zeros)
 from numpy.random import normal
 from scipy.ndimage import (
     find_objects, generate_binary_structure, label, map_coordinates, shift)
@@ -36,8 +36,8 @@ def to_polar(img, noise_map, coord):
     :param str coord: coordinate type: "radial" or "circ"
 
     :return: transformed image and noise map; shape is (h x w) for circular
-        mapping and (w x h) for radial mapping, where (h x w) is the input image
-        shape
+        mapping and (w x h) for radial mapping, where (h x w) is the input
+        image shape
     :rtype: tuple(numpy.ndarray, numpy.ndarray)
     """
     h, w = img.shape
@@ -96,8 +96,8 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         an integer value in pixels or a floating-point value from 0 to 1 in
         units of image size
     :param float threshold: detection threshold in units of noise RMS
-    :param int min_connected: minimum number of connected pixels above threshold
-        for object detection
+    :param int min_connected: minimum number of connected pixels above
+        threshold for object detection
     :param float hi_clip: high image data clipping percentile (0 to 100)
     :param float noise_lo: low noise clipping percentile (0 to 100)
     :param float noise_hi: high noise clipping percentile (0 to 100)
@@ -139,10 +139,15 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
     else:
         noise_map = None
     img -= bkg + rms*threshold
-    # noinspection PyTypeChecker
-    img = img.clip(0, percentile(img, hi_clip))
+    if isinstance(img, ma.MaskedArray):
+        perc = nanpercentile(ma.filled(img, nan), hi_clip)
+    else:
+        perc = percentile(img, hi_clip)
+    img = img.clip(0, perc)
+    del perc
 
-    # Mask pixels not belonging to connected groups; don't include masked pixels
+    # Mask pixels not belonging to connected groups; don't include masked
+    # pixels
     if isinstance(img, ma.MaskedArray):
         img[img.mask] = 0
         img = img.data
@@ -200,7 +205,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         v[:-1, i] = img[:, i*bw:(i + 1)*bw].sum(1)
 
     # Normalize volumes and build a linear interpolator
-    max_vol = v.max()
+    max_vol = v.max(initial=0)
     if max_vol:
         v *= volume/max_vol
     v = interp1d(arange(h + 1)/tempo, v, axis=0)
@@ -216,7 +221,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
             v_noise = zeros([h + 1, n])
             for i in range(n):
                 v_noise[:-1, i] = noise_map[:, i*bw:(i + 1)*bw].sum(1)
-            max_vol = v_noise.max()
+            max_vol = v_noise.max(initial=0)
             if max_vol:
                 v_noise *= noise_volume/max_vol
             v_noise = interp1d(arange(h + 1)/tempo, v_noise, axis=0)
