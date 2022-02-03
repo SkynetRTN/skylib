@@ -9,7 +9,9 @@ from __future__ import absolute_import, division, print_function
 
 from typing import Any, Dict, Optional, Tuple, Union
 
-from numpy import ceil, isfinite, ndarray, pi, zeros
+from numpy import (
+    array, ceil, float32, histogram as numpy_histogram, isfinite, ndarray, pi,
+    zeros)
 from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma, gaussian_sigma_to_fwhm
@@ -23,7 +25,7 @@ from ..calibration.background import estimate_background, sep_compatible
 
 
 __all__ = [
-    'extract_sources',
+    'extract_sources', 'histogram',
     'OBJ_MERGED', 'OBJ_TRUNC', 'OBJ_DOVERFLOW', 'OBJ_SINGU',
     'APER_TRUNC', 'APER_HASMASKED', 'APER_ALLMASKED', 'APER_NONPOSITIVE',
 ]
@@ -93,7 +95,8 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
         of the kernel, which makes sense for sources elongated due to bad
         tracking
     :param theta: position angle of the Gaussian kernel major axis with respect
-        to the positive X axis, in degrees CCW; ignored if `fwhm`=0 or `ratio`=1
+        to the positive X axis, in degrees CCW; ignored if `fwhm`=0 or
+        `ratio`=1
     :param min_pixels: discard objects with less pixels above threshold
     :param min_fwhm: discard objects with smaller FWHM in pixels
     :param max_fwhm: discard objects with larger FWHM in pixels; 0 to disable
@@ -238,3 +241,47 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
             2*gaussian_sigma_to_fwhm*sources['a'])
 
     return sources, bkg, rms
+
+
+def histogram(data: Union[ndarray, MaskedArray],
+              bins: Union[str, int] = 'auto') -> Tuple[ndarray, float, float]:
+    """
+    Calculate image histogram with automatic data range and number of bins
+
+    :param data: input array
+    :param bins: either the number of histogram bins or algorithm to compute
+        this number ("auto", "fd", "doane", "scott", "rice", "sturges", or
+        "sqrt", see https://docs.scipy.org/doc/numpy/reference/generated/
+        numpy.histogram.html
+
+    :return: 1D histogram array plus the left and right histogram boundaries
+    """
+    if isinstance(data, MaskedArray):
+        data = data.compressed()
+
+    if data.size:
+        min_bin = float(data.min(initial=None))
+        max_bin = float(data.max(initial=None))
+        if isinstance(bins, int) and not (data % 1).any():
+            if max_bin - min_bin < 0x100:
+                # 8-bit integer data; use 256 bins maximum
+                bins = min(bins, 0x100)
+            elif max_bin - min_bin < 0x10000:
+                # 16-bit integer data; use 65536 bins maximum
+                bins = min(bins, 0x10000)
+
+        if max_bin == min_bin:
+            # Constant data, use unit bin size if the number of bins
+            # is fixed or unit range otherwise
+            if isinstance(bins, int):
+                max_bin = min_bin + bins
+            else:
+                max_bin = min_bin + 1
+
+        data = numpy_histogram(data, bins, (min_bin, max_bin))[0]
+    else:
+        # Empty or fully masked image
+        data = array([], float32)
+        min_bin, max_bin = 0.0, 65535.0
+
+    return data, min_bin, max_bin
