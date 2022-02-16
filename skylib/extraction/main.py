@@ -10,8 +10,8 @@ from __future__ import absolute_import, division, print_function
 from typing import Any, Dict, Optional, Tuple, Union
 
 from numpy import (
-    array, ceil, float32, histogram as numpy_histogram, isfinite, ndarray, pi,
-    zeros)
+    argmax, argmin, array, ceil, float32, histogram as numpy_histogram,
+    isfinite, ndarray, pi, zeros)
 from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma, gaussian_sigma_to_fwhm
@@ -25,7 +25,7 @@ from ..calibration.background import estimate_background, sep_compatible
 
 
 __all__ = [
-    'extract_sources', 'histogram',
+    'extract_sources', 'histogram', 'auto_sat_level',
     'OBJ_MERGED', 'OBJ_TRUNC', 'OBJ_DOVERFLOW', 'OBJ_SINGU',
     'APER_TRUNC', 'APER_HASMASKED', 'APER_ALLMASKED', 'APER_NONPOSITIVE',
 ]
@@ -285,3 +285,53 @@ def histogram(data: Union[ndarray, MaskedArray],
         min_bin, max_bin = 0.0, 65535.0
 
     return data, min_bin, max_bin
+
+
+def auto_sat_level(data: Union[ndarray, MaskedArray]) -> Optional[float]:
+    """
+    Estimate saturation level based on the image histogram
+
+    :param data: input array
+
+    :return: empirical saturation level or None if no saturated pixels
+        were found or not enough info to estimate the saturation level
+    """
+    # Compute a low-resolution image histogram
+    n = 16
+    coarse_hist, mn, mx = histogram(data, bins=n)
+    if len(coarse_hist) < n:
+        # Not enough data
+        print('Not enough data for auto sat level')
+        return
+
+    # Go 2/3 way to the right from the modal value
+    binsize = (mx - mn)/n
+    imax = argmax(coarse_hist)
+    left = imax + 2*(n - imax)//3
+    mn += left*binsize
+    hist = coarse_hist[left:]
+    if not len(hist):
+        # Not enough data to find minimum
+        print('No global minimum for auto sat level')
+        return
+
+    # Find the second mode in the right part of the histogram, which should
+    # normally be the rightmost bin, and which corresponds to saturated pixels;
+    # all variations are presumably introduced by applying dark and flat
+    mn += argmax(hist)*binsize
+    mx = mn + binsize
+
+    # Find a more accurate saturation level value within this bin; this will be
+    # the right boundary of the rightmost minimum to the left of the maximum
+    # of a 8x higher resolution histogram ignoring data outside the modal bin
+    n = 8
+    hist = numpy_histogram(data[(data >= mn) & (data <= mx)], n, (mn, mx))[0]
+    imax = argmax(hist)
+    if imax:
+        imin = imax - argmin(hist[:imax][::-1])
+    else:
+        imin = 0
+    sat_level = mn + imin*(mx - mn)/n
+    print('Auto sat level: {} [{}, {}]; coarse hist: {}, fine hist: {}'
+          .format(sat_level, mn, mx, coarse_hist, hist))
+    return sat_level
