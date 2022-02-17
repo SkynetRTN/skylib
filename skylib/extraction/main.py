@@ -303,35 +303,27 @@ def auto_sat_level(data: Union[ndarray, MaskedArray]) -> Optional[float]:
         # Not enough data
         print('Not enough data for auto sat level')
         return
+    n = len(coarse_hist)
 
-    # Go 2/3 way to the right from the modal value
-    binsize = (mx - mn)/n
-    imax = argmax(coarse_hist)
-    left = imax + 2*(n - imax)//3
-    mn += left*binsize
-    hist = coarse_hist[left:]
-    if not len(hist):
-        # Not enough data to find minimum
-        print('No global minimum for auto sat level')
+    # Assume that the rightmost bin contains saturated pixels
+    if coarse_hist[n - 1] <= coarse_hist[n - 2]:
+        # Treat as no saturated pixels if the previous bin contains more pixels
+        print('No saturated pixels detected')
         return
 
-    # Find the second mode in the right part of the histogram, which should
-    # normally be the rightmost bin, and which corresponds to saturated pixels;
-    # all variations are presumably introduced by applying dark and flat
-    mn += argmax(hist)*binsize
-    mx = mn + binsize
-
-    # Find a more accurate saturation level value within this bin; this will be
-    # the right boundary of the rightmost minimum to the left of the maximum
-    # of a 8x higher resolution histogram ignoring data outside the modal bin
-    n = 8
-    hist = numpy_histogram(data[(data >= mn) & (data <= mx)], n, (mn, mx))[0]
+    # Find a more accurate saturation level value within the rightmost bin;
+    # this will be the right boundary of the rightmost minimum to the left of
+    # the maximum of a 16x higher resolution histogram
+    mn = mx - (mx - mn)/n
+    n = 16
+    hist = numpy_histogram(data, n, (mn, mx))[0]
     imax = argmax(hist)
     if imax:
         imin = imax - argmin(hist[:imax][::-1])
     else:
         imin = 0
     sat_level = mn + imin*(mx - mn)/n
-    print('Auto sat level: {} [{}, {}]; coarse hist: {}, fine hist: {}'
-          .format(sat_level, mn, mx, coarse_hist, hist))
+    print('Auto sat level: {} [{}, {}]; coarse hist: [{}], fine hist: [{}]'
+          .format(sat_level, mn, mx, ' '.join(str(x) for x in coarse_hist),
+                  ' '.join(str(x) for x in hist)))
     return sat_level
