@@ -304,7 +304,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
 
     # TODO: Don't force lucky imaging with scaling=mode when supported by UI
     if scaling == 'mode':
-        lucky_imaging = 'SNR'
+        scaling, lucky_imaging = None, 'SNR'
 
     if not lucky_imaging:
         score_func = None
@@ -363,7 +363,12 @@ def combine(input_data: List[Union[pyfits.HDUList,
             score = score_func(res)
             for image_to_exclude in input_data:
                 new_data = list(final_data)
-                new_data.remove(image_to_exclude)
+                # Cannot just do new_data.remove(image_to_exclude) in older
+                # Python versions
+                for i, x in enumerate(final_data):
+                    if x is image_to_exclude:
+                        del new_data[i]
+                        break
                 new_res, new_rej_percent = _do_combine(
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
