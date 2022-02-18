@@ -298,8 +298,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
         header(s) copied from one of the input images and modified to reflect
         the stacking mode and parameters
     """
-    n = len(input_data)
-    if n < 2:
+    if len(input_data) < 2:
         raise ValueError('No data to combine')
 
     # TODO: Don't force lucky imaging with scaling=mode when supported by UI
@@ -357,11 +356,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
         total_progress += progress_step
 
         final_data = list(input_data)
-        if score_func is not None:
+        if score_func is not None and len(final_data) > 1:
             # Lucky imaging mode; try excluding images one by one; keep
             # the image if excluding it does not improve the score
             score = score_func(res)
             for image_to_exclude in input_data:
+                if len(final_data) < 2:
+                    break
                 new_data = list(final_data)
                 # Cannot just do new_data.remove(image_to_exclude) in older
                 # Python versions
@@ -464,7 +465,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
         elif rejection == 'sigclip':
             hdr['SLOW'] = (lo, 'Lower sigma used with rejection')
             hdr['SHIGH'] = (hi, 'Upper sigma used with rejection')
-        hdr['REJPRCNT'] = (float(rej_percent/data_width/data_height/n*100),
+        hdr['REJPRCNT'] = (float(rej_percent/data_width/data_height /
+                                 len(final_data)*100),
                            'Percentage of rejected pixels')
 
         hdr['SCAMETH'] = (
@@ -473,7 +475,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
 
         hdr['WGTMETH'] = ('NONE', 'Weight method used in combining')
 
-        hdr['NCOMB'] = (n, 'Number of images used in combining')
+        hdr['NCOMB'] = (len(final_data), 'Number of images used in combining')
+        hdr['LUCKY'] = (str(lucky_imaging), 'Optimal stacking mode')
 
         for i, im in enumerate(final_data):
             if isinstance(im, pyfits.HDUList) and im.filename():
