@@ -301,10 +301,6 @@ def combine(input_data: List[Union[pyfits.HDUList,
     if len(input_data) < 2:
         raise ValueError('No data to combine')
 
-    # TODO: Don't force lucky imaging with scaling=mode when supported by UI
-    if scaling == 'mode':
-        scaling, lucky_imaging = None, 'SNR'
-
     if not lucky_imaging:
         score_func = None
     else:
