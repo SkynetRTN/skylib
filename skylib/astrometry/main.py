@@ -23,8 +23,8 @@ __all__ = ['Solver', 'solve_field']
 class Solver(object):
     """
     Class that encapsulates the :class:`skylib.astrometry.an_engine.solver_t`
-    object and the list of indexes. An instance is created in each solver thread
-    and is supplied to :func:`solve_field`.
+    object and the list of indexes. An instance is created in each solver
+    thread and is supplied to :func:`solve_field`.
 
     Attributes::
         solver: Astrometry.net engine :class:`an_engine.solver_t` object
@@ -115,8 +115,8 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
     :param bool | None parity: image parity (sign of coordinate transformation
         matrix determinant): True = normal parity, False = flipped image, None
         (default) = try both
-    :param int sip_order: order of SIP distortion terms; default: 3; 0 - disable
-        calculation of distortion
+    :param int sip_order: order of SIP distortion terms; default: 3;
+        0 - disable calculation of distortion
     :param bool crpix_center: set reference pixel to image center
     :param int max_sources: use only the given number of brightest sources;
         0/""/None (default) = no limit
@@ -213,7 +213,8 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
         fmax = numpy.hypot(width, height)*max_scale
         indices = []
         for index in engine.indexes:
-            if fmin > index.index_scale_upper or fmax < index.index_scale_lower:
+            if fmin > index.index_scale_upper or \
+                    fmax < index.index_scale_lower:
                 continue
             if not an_engine.index_is_within_range(index, ra, dec, r):
                 continue
@@ -256,30 +257,33 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
             # Get WCS parameters of best solution
             sol.wcs = WCS(naxis=2)
 
+            wcs_ctype = ('RA---TAN', 'DEC--TAN')
             if enable_sip:
                 sip = best_match.sip
                 wcstan = sip.wcstan
-                sol.wcs.wcs.ctype = ('RA---TAN-SIP', 'DEC--TAN-SIP')
 
                 a_order, b_order = sip.a_order, sip.b_order
-                ap_order, bp_order = sip.ap_order, sip.bp_order
-                a = array_from_swig(
-                    sip.a, (an_engine.SIP_MAXORDER, an_engine.SIP_MAXORDER))
-                b = array_from_swig(
-                    sip.b, (an_engine.SIP_MAXORDER, an_engine.SIP_MAXORDER))
-                ap = array_from_swig(
-                    sip.ap, (an_engine.SIP_MAXORDER, an_engine.SIP_MAXORDER))
-                bp = array_from_swig(
-                    sip.bp, (an_engine.SIP_MAXORDER, an_engine.SIP_MAXORDER))
-                sol.wcs.sip = Sip(
-                    a[:a_order + 1, :a_order + 1],
-                    b[:b_order + 1, :b_order + 1],
-                    ap[:ap_order + 1, :ap_order + 1],
-                    bp[:bp_order + 1, :bp_order + 1],
-                    sol.wcs.wcs.crpix)
+                if a_order > 0 or b_order > 0:
+                    ap_order, bp_order = sip.ap_order, sip.bp_order
+                    maxorder = an_engine.SIP_MAXORDER
+                    a = array_from_swig(
+                        sip.a, (maxorder, maxorder)
+                    )[:a_order + 1, :a_order + 1]
+                    b = array_from_swig(
+                        sip.b, (maxorder, maxorder)
+                    )[:b_order + 1, :b_order + 1]
+                    if a.any() or b.any():
+                        ap = array_from_swig(
+                            sip.ap, (maxorder, maxorder)
+                        )[:ap_order + 1, :ap_order + 1]
+                        bp = array_from_swig(
+                            sip.bp, (maxorder, maxorder)
+                        )[:bp_order + 1, :bp_order + 1]
+                        sol.wcs.sip = Sip(a, b, ap, bp, sol.wcs.wcs.crpix)
+                        wcs_ctype = ('RA---TAN-SIP', 'DEC--TAN-SIP')
             else:
                 wcstan = best_match.wcstan
-                sol.wcs.wcs.ctype = ('RA---TAN', 'DEC--TAN')
+            sol.wcs.wcs.ctype = wcs_ctype
             sol.wcs.wcs.crpix = array_from_swig(wcstan.crpix, (2,))
             sol.wcs.wcs.crval = array_from_swig(wcstan.crval, (2,))
             sol.wcs.wcs.cd = array_from_swig(wcstan.cd, (2, 2))
@@ -293,5 +297,6 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
 
         return sol
     finally:
-        # Make solver ready for the next solution
+        # Cleanup and make solver ready for the next solution
         an_engine.solver_cleanup_field(solver)
+        an_engine.solver_clear_indexes(solver)
