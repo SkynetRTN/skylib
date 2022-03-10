@@ -44,7 +44,7 @@ time_t timer_callback(void* userdata) {
     return (time_t)res;
 }
 
-void set_timer_callback(solver_t* solver, unsigned long cbptr) {
+void set_timer_callback(solver_t* solver, unsigned long long cbptr) {
     py_timer_callback = (timer_callback_t)cbptr;
     solver->timer_callback = timer_callback;
 }
