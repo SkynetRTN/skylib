@@ -6,11 +6,11 @@ Statistics-related functions
 
 from typing import Optional, Union
 
-from numpy import array, clip, inf, ma, ndarray, sqrt, zeros
+from numpy import array, clip, inf, ma, ndarray, r_, sqrt, zeros
 from scipy.special import erf
 
 
-__all__ = ['chauvenet', 'weighted_median']
+__all__ = ['chauvenet', 'weighted_median', 'weighted_quantile']
 
 
 def chauvenet(data: ndarray, min_vals: int = 10,
@@ -89,11 +89,54 @@ def chauvenet(data: ndarray, min_vals: int = 10,
     return data.mask
 
 
+def weighted_quantile(data: Union[ndarray, list],
+                      weights: Union[ndarray, list],
+                      q: float,
+                      period: Optional[float] = None) -> float:
+    """
+    Calculate weighted quantile of a 1D data array; see
+    https://arxiv.org/pdf/1807.05276.pdf, Eqs.17--20
+
+    :param data: input data
+    :param weights: input weights, same shape as `data`; not necessarily
+        normalized but should be non-negative
+    :param q: quantile value, 0 <= `percentile` <= 1
+    :param period: if specified, handle cyclic quantities (like angles) with
+        the given period
+
+    :return: weighted percentile of data
+
+    >>> weighted_quantile([1, 2, 3, 4], [4.9, 0.1, 2.5, 2.5], 0.683)
+    3.049
+    """
+    data, weights = array(data).squeeze(), array(weights).squeeze()
+    sw = q*weights.sum()
+
+    if period is not None and data.size > 1:
+        halfperiod = period/2
+        data = data % period
+        if (data < halfperiod).any() and (data >= halfperiod).any() and \
+                min(data.min(), (period - data).min()) < \
+                abs(data - halfperiod).min():
+            data[data >= halfperiod] -= period
+
+    if any(weights > sw):
+        return (data[weights == weights.max()])[0]
+
+    s_data, s_weights = map(array, zip(*sorted(zip(data, weights))))
+    cs_weights = s_weights.cumsum()
+    sj = r_[0, q*cs_weights + (1 - q)*(r_[0, cs_weights[:-1]])]
+    j = (sj >= sw).nonzero()[0][0]
+    if j < 2:
+        return s_data[0]
+    return s_data[j - 2] + (s_data[j - 1] - s_data[j - 2])*(sw - sj[j - 1]) / \
+        (sj[j] - sj[j - 1])
+
+
 def weighted_median(data: Union[ndarray, list], weights: Union[ndarray, list],
                     period: Optional[float] = None) -> float:
     """
     Calculate weighted median of a 1D data array
-    Adapted from: https://gist.github.com/tinybike/d9ff1dad515b66cc0d87
 
     :param data: input data
     :param weights: input weights, same shape as `data`; not necessarily
@@ -104,27 +147,6 @@ def weighted_median(data: Union[ndarray, list], weights: Union[ndarray, list],
     :return: weighted median of data
 
     >>> weighted_median([1, 2, 3, 4], [4.9, 0.1, 2.5, 2.5])
-    2.5
+    2.0384615384615383
     """
-    data, weights = array(data).squeeze(), array(weights).squeeze()
-    midpoint = weights.sum()/2
-
-    if period is not None and data.size > 1:
-        halfperiod = period/2
-        data = data % period
-        if (data < halfperiod).any() and (data >= halfperiod).any() and \
-                min(data.min(), (period - data).min()) < \
-                abs(data - halfperiod).min():
-            data[data >= halfperiod] -= period
-
-    if any(weights > midpoint):
-        w_median = (data[weights == weights.max()])[0]
-    else:
-        s_data, s_weights = map(array, zip(*sorted(zip(data, weights))))
-        cs_weights = s_weights.cumsum()
-        idx = (cs_weights <= midpoint).nonzero()[0][-1]
-        if cs_weights[idx] == midpoint:
-            w_median = s_data[idx:idx + 2].mean()
-        else:
-            w_median = s_data[idx + 1]
-    return w_median
+    return weighted_quantile(data, weights, 0.5, period)
