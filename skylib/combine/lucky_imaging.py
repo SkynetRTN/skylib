@@ -6,7 +6,7 @@ Used by :func:`skylib.combine.stacking.combine`.
 
 from typing import Union
 
-from numpy import ma, ndarray
+from numpy import ma, ndarray, sqrt
 
 from ..calibration.background import estimate_background
 
@@ -24,7 +24,7 @@ def snr_score(img: Union[ndarray, ma.MaskedArray]) -> float:
     :return: scalar image score
     """
     bk, rms = estimate_background(img)
-    return (((img - bk)/rms)**2).sum()
+    return sqrt((((img - bk)/rms)**2).mean())
 
 
 lucky_imaging_score = {
