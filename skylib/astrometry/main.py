@@ -279,7 +279,8 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
                         bp = array_from_swig(
                             sip.bp, (maxorder, maxorder)
                         )[:bp_order + 1, :bp_order + 1]
-                        sol.wcs.sip = Sip(a, b, ap, bp, sol.wcs.wcs.crpix)
+                        sol.wcs.sip = Sip(
+                            a, b, ap, bp, array_from_swig(wcstan.crpix, (2,)))
                         wcs_ctype = ('RA---TAN-SIP', 'DEC--TAN-SIP')
             else:
                 wcstan = best_match.wcstan
