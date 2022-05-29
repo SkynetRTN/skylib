@@ -10,8 +10,8 @@ from __future__ import absolute_import, division, print_function
 from typing import Any, Dict, Optional, Tuple, Union
 
 from numpy import (
-    argmax, argmin, array, ceil, float32, histogram as numpy_histogram,
-    isfinite, ndarray, pi, zeros)
+    argmax, argmin, array, ceil, float32, floor, histogram as numpy_histogram,
+    isfinite, ndarray, pi, sqrt, zeros)
 from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
 from astropy.stats import gaussian_fwhm_to_sigma, gaussian_sigma_to_fwhm
@@ -252,7 +252,7 @@ def histogram(data: Union[ndarray, MaskedArray],
     :param bins: either the number of histogram bins or algorithm to compute
         this number ("auto", "fd", "doane", "scott", "rice", "sturges", or
         "sqrt", see https://docs.scipy.org/doc/numpy/reference/generated/
-        numpy.histogram.html
+        numpy.histogram.html, or "background"
 
     :return: 1D histogram array plus the left and right histogram boundaries
     """
@@ -262,6 +262,23 @@ def histogram(data: Union[ndarray, MaskedArray],
     if data.size:
         min_bin = float(data.min(initial=None))
         max_bin = float(data.max(initial=None))
+
+        if bins == 'background':
+            from astropy.stats import SigmaClip
+            from photutils.background import (
+                Background2D, ModeEstimatorBackground, MADStdBackgroundRMS)
+            mesh_size = floor(sqrt(data.size)/20)
+            bkg = Background2D(
+                data, (mesh_size, mesh_size), filter_size=(3, 3),
+                sigma_clip=SigmaClip(sigma=3),
+                bkg_estimator=ModeEstimatorBackground(),
+                bkgrms_estimator=MADStdBackgroundRMS())
+            # bin_width = bkg.background_rms_median*4/data.size**(1/3)
+
+            bin_width = (bkg.background_rms_median*4)/30
+
+            bins = floor((max_bin - min_bin) / bin_width)
+
         if isinstance(bins, int) and not (data % 1).any():
             if max_bin - min_bin < 0x100:
                 # 8-bit integer data; use 256 bins maximum
