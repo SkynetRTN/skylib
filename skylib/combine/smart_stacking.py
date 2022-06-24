@@ -1,5 +1,5 @@
 """
-Score functions for "lucky imaging" (optimal) stacking
+Score functions for smart stacking
 
 Used by :func:`skylib.combine.stacking.combine`.
 """
@@ -11,22 +11,26 @@ from numpy import ma, ndarray, sqrt
 from ..calibration.background import estimate_background
 
 
-__all__ = ['lucky_imaging_score']
+__all__ = ['smart_stacking_score']
 
 
 def snr_score(img: Union[ndarray, ma.MaskedArray]) -> float:
     """
-    Return image score based on the squared sum of per-pixel SNRs; used by
-    :func:`combine` with `lucky_imaging` = "SNR"
+    Return image score based on the total image SNR; used by :func:`combine`
+    with `smart_stacking` = "SNR"
 
     :param img: input image
 
     :return: scalar image score
     """
     bk, rms = estimate_background(img)
-    return sqrt((((img - bk)/rms)**2).mean())
+    flux = (img - bk).sum()
+    noise = flux + (rms**2).sum()
+    if noise > 0:
+        return flux/sqrt(noise)
+    return 0
 
 
-lucky_imaging_score = {
+smart_stacking_score = {
     'SNR': snr_score,
 }

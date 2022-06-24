@@ -19,7 +19,7 @@ import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
 from ..util.fits import get_fits_time
-from .lucky_imaging import lucky_imaging_score
+from .smart_stacking import smart_stacking_score
 
 
 __all__ = ['combine']
@@ -46,7 +46,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     n = len(input_data)
 
     # Calculate scaling factors
-    k_ref, k = None, []
+    k_ref, k, offsets = None, [], []
     if scaling:
         for data_no, f in enumerate(input_data):
             if isinstance(f, pyfits.HDUList):
@@ -54,17 +54,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             else:
                 data = f[0]
             if scaling == 'average':
-                k.append(data.mean())
+                avg = data.mean()
             elif scaling == 'percentile':
                 if percentile == 50:
-                    k.append(
-                        median(data) if not isinstance(data, ma.MaskedArray)
-                        else ma.median(data))
+                    avg = median(data) \
+                        if not isinstance(data, ma.MaskedArray) \
+                        else ma.median(data)
                 else:
-                    k.append(
-                        np_percentile(data, percentile)
-                        if not isinstance(data, ma.MaskedArray)
-                        else np_percentile(data.compressed(), percentile))
+                    avg = np_percentile(data, percentile) \
+                        if not isinstance(data, ma.MaskedArray) \
+                        else np_percentile(data.compressed(), percentile)
             elif scaling == 'mode':
                 # Compute modal values from histograms; convert to integer
                 # and assume 2 x 16-bit data range
@@ -73,22 +72,30 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 else:
                     data = data.ravel()
                 min_val = data.min(initial=0)
-                k.append(
-                    argmax(bincount(
-                        (data - min_val).clip(0, 2*0x10000 - 1)
-                        .astype(int32))) + min_val)
+                avg = argmax(bincount(
+                    (data - min_val).clip(0, 2*0x10000 - 1)
+                    .astype(int32))) + min_val
             else:
                 raise ValueError(
                     'Unknown scaling mode "{}"'.format(scaling))
+
+            if avg > 0:
+                ofs = 0
+            else:
+                # To make sure that all images are scaled by a positive factor,
+                # add a constant offset to the image so that its average = 1
+                ofs, avg = 1 - avg, 1
+            k.append(avg)
+            offsets.append(ofs)
+
             if callback is not None:
                 callback(progress + (data_no + 1)/n/2*progress_step)
 
-        # Normalize to the first frame with non-zero average; keep images
-        # with zero or same average as is
+        # Normalize to the first frame with positive average
         k_ref = k[0]
-        if not k_ref:
+        if k_ref == 1:
             for ki in k[1:]:
-                if ki:
+                if ki != 1:
                     k_ref = ki
                     break
 
@@ -117,10 +124,12 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             if isinstance(f, pyfits.HDUList) else f[0][chunk:chunk + chunksize]
             for f in input_data
         ]
-        if k_ref:
+        if scaling:
             # Scale data
-            for data, ki in zip(datacube, k):
-                if ki not in (0, k_ref):
+            for data, ki, ofsi in zip(datacube, k, offsets):
+                if ofsi:
+                    data += ofsi
+                if ki != k_ref:
                     data *= k_ref/ki
 
         # Reject outliers
@@ -240,7 +249,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             rejection: Optional[str] = None, min_keep: int = 2,
             percentile: float = 50.0,
             lo: Optional[float] = None, hi: Optional[float] = None,
-            lucky_imaging: Optional[str] = None, max_mem_mb: float = 100.0,
+            smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
             callback: Optional[callable] = None) \
         -> List[Tuple[ndarray, pyfits.Header]]:
     """
@@ -277,13 +286,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
             default: not set
         `rejection` = "sigclip": reject values more than `hi` sigmas above the
             baseline; default: 3
-    :param lucky_imaging: enable "lucky imaging" or "optimal" stacking:
+    :param smart_stacking: enable smart stacking ("lucky imaging"):
         automatically exclude those images from the stack that will not improve
         its quality in a certain sense; currently supported modes:
             "SNR": don't include image if it won't improve the resulting
                 signal-to-noise ratio of sources; suitable for deep-sky imaging
                 to reject images taken through clouds or with bad alignment
-        WARNING. Enabling lucky imaging stacking may dramatically increase
+        WARNING. Enabling smart stacking may dramatically increase
                  the processing time.
     :param max_mem_mb: maximum amount of RAM in megabytes to use during
         stacking
@@ -301,14 +310,14 @@ def combine(input_data: List[Union[pyfits.HDUList,
     if len(input_data) < 2:
         raise ValueError('No data to combine')
 
-    if not lucky_imaging:
+    if not smart_stacking:
         score_func = None
     else:
         try:
-            score_func = lucky_imaging_score[lucky_imaging]
+            score_func = smart_stacking_score[smart_stacking]
         except KeyError:
             raise ValueError(
-                'Unknown lucky imaging mode "{}"'.format(lucky_imaging))
+                'Unknown smart stacking mode "{}"'.format(smart_stacking))
 
     nhdus = None
     for f in input_data:
@@ -353,7 +362,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
 
         final_data = list(input_data)
         if score_func is not None and len(final_data) > 1:
-            # Lucky imaging mode; try excluding images one by one; keep
+            # Smart stacking mode; try excluding images one by one; keep
             # the image if excluding it does not improve the score
             score = score_func(res)
             for image_to_exclude in input_data:
@@ -472,11 +481,11 @@ def combine(input_data: List[Union[pyfits.HDUList,
         hdr['WGTMETH'] = ('NONE', 'Weight method used in combining')
 
         hdr['NCOMB'] = (len(final_data), 'Number of images used in combining')
-        hdr['LUCKY'] = (str(lucky_imaging), 'Optimal stacking mode')
+        hdr['SMARTSTK'] = (str(smart_stacking), 'Smart stacking mode')
 
         for i, im in enumerate(final_data):
             if isinstance(im, pyfits.HDUList) and im.filename():
-                hdr['IMGS{:04d}'.format(i)] = (
+                hdr['IMG_{:04d}'.format(i)] = (
                     os.path.basename(im.filename()), 'Component filename')
 
         output.append((res, hdr))
