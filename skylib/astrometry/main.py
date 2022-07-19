@@ -10,6 +10,7 @@ given a list of XY positions of field stars.
 from __future__ import absolute_import, division, print_function
 
 import os
+import sys
 from glob import glob
 import ctypes
 import numpy
@@ -17,7 +18,7 @@ from astropy.wcs import Sip, WCS
 from . import an_engine
 
 
-__all__ = ['Solver', 'solve_field']
+__all__ = ['Solver', 'solve_field', 'solve_field_glob']
 
 
 class Solver(object):
@@ -29,7 +30,12 @@ class Solver(object):
     Attributes::
         solver: Astrometry.net engine :class:`an_engine.solver_t` object
         indexes: list of :class:`an_engine.index_t` instances
+        globs: (RA_hours, Dec_degs, r_arcmins) list of globular clusters
+            utilized by :func:`solve_field_glob` to find a WCS solution
+            in the vicinity of a globular cluster
     """
+    globs = None  # type: list
+
     def __init__(self, index_path):
         """
         Create solver
@@ -60,6 +66,25 @@ class Solver(object):
         # should be faster)
         self.indexes.sort(key=lambda _idx: _idx.nquads)
 
+        # Load the list of globular clusters
+        self.globs = []
+        with open(os.path.join(os.path.dirname(__file__), 'ngc2000.dat')) as f:
+            for line in f.read().splitlines():
+                # noinspection PyBroadException
+                try:
+                    typ = line[6:9].strip()
+                    if typ != 'Gb':
+                        continue
+                    ra_h, ra_m = line[10:12], line[13:17]
+                    dec_s, dec_d, dec_m = line[19], line[20:22], line[23:25]
+                    ra = (int(ra_h) + float(ra_m)/60)*15  # degrees
+                    dec = (1 - 2*(dec_s == '-'))*(int(dec_d) + int(dec_m)/60.0)
+                    r = float(line[33:38])/2
+                    # RA/Dec/radius in radians
+                    self.globs.append(numpy.deg2rad([ra, dec, r/60]))
+                except Exception:
+                    pass
+
 
 class Solution(object):
     """
@@ -75,7 +100,7 @@ class Solution(object):
         n_field: total number of sources
         index_name: index file name that solved the image
     """
-    wcs = None
+    wcs = None  # type: WCS
     log_odds = None
     n_match = None
     n_conflict = None
@@ -92,7 +117,7 @@ def array_from_swig(data, shape, dtype=numpy.float64):
 def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
                 dec_degs=0, radius=180, min_scale=0.1, max_scale=10,
                 parity=None, sip_order=3, crpix_center=True, max_sources=None,
-                retry_lost=True, callback=None):
+                retry_lost=True, callback=None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 
@@ -130,7 +155,6 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
 
     :return: astrometric solution object; its `wcs` attribute is set to None if
         solution was not found
-    :rtype: :class:`Solution`
     """
     solver = engine.solver
     ra = float(ra_hours)*15
@@ -139,10 +163,16 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
 
     # Set timer callback if requested
     if callback is not None:
+        if sys.platform.startswith('win32'):
+            time_t = ctypes.c_int64
+        elif ctypes.sizeof(ctypes.c_void_p) == ctypes.sizeof(ctypes.c_int64):
+            time_t = ctypes.c_int64
+        else:
+            time_t = ctypes.c_int32
         an_engine.set_timer_callback(
             solver,
             ctypes.cast(
-                ctypes.CFUNCTYPE(ctypes.c_int)(callback),
+                ctypes.CFUNCTYPE(time_t)(callback),
                 ctypes.c_voidp).value)
     else:
         an_engine.set_timer_callback(solver, 0)
@@ -301,3 +331,100 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
         # Cleanup and make solver ready for the next solution
         an_engine.solver_cleanup_field(solver)
         an_engine.solver_clear_indexes(solver)
+
+
+def solve_field_glob(engine, xy, flux=None, width=None, height=None,
+                     ra_hours=0, dec_degs=0, radius=180, min_scale=0.1,
+                     max_scale=10, parity=None, sip_order=3, crpix_center=True,
+                     max_sources=None, retry_lost=True, callback=None,
+                     min_sources=10, initial_radius=1, radius_step=0.8) \
+        -> Solution:
+    """
+    Obtain astrometric solution given XY coordinates of field stars; works
+    for fields around globular clusters
+
+    :param :class:`Solver` engine: Astrometry.net engine solver instance
+    :param array_like xy: (n x 2) array of 1-based X and Y pixel coordinates
+        of stars
+    :param array_like flux: optional n-element array of star fluxes
+    :param int width: image width in pixels; defaults to the maximum minus
+        minimum X coordinate of stars
+    :param int height: image height in pixels; defaults to the maximum minus
+        minimum Y coordinate of stars
+    :param float ra_hours: optional RA of image center in hours; default: 0
+    :param float dec_degs: optional Dec of image center in degrees; default: 0
+    :param float radius: optional field search radius in degrees; default: 180
+        (search over the whole sky)
+    :param float min_scale: optional minimum pixel scale in arcseconds per
+        pixel; default: 0.1
+    :param float max_scale: optional maximum pixel scale in arcseconds per
+        pixel; default: 10
+    :param bool | None parity: image parity (sign of coordinate transformation
+        matrix determinant): True = normal parity, False = flipped image, None
+        (default) = try both
+    :param int sip_order: order of SIP distortion terms; default: 3;
+        0 - disable calculation of distortion
+    :param bool crpix_center: set reference pixel to image center
+    :param int max_sources: use only the given number of brightest sources;
+        0/""/None (default) = no limit
+    :param bool retry_lost: if solution failed, retry in the "lost in space"
+        mode, i.e. without coordinate restrictions (`radius` = 180) and with
+        opposite parity, unless the initial search already had these
+        restrictions disabled
+    :param callable callback: optional callable that is regularly called
+        by the solver, accepts no arguments, and returns 0 to interrupt
+        the solution and 1 otherwise
+    :param int min_sources: minimum number of sources outside the cluster
+        exclusion circle required to find a solution
+    :param float initial_radius: initial exclusion circle radius in units
+        of the globular cluster radius
+    :param float radius_step: gradually decrease the exclusion circle radius
+        by this factor if not enough sources outside the circle
+
+    :return: astrometric solution object; its `wcs` attribute is set to None if
+        solution was not found
+    """
+    sol = solve_field(engine, xy, flux, width, height, ra_hours, dec_degs,
+                      radius, min_scale, max_scale, parity, sip_order,
+                      crpix_center, max_sources, retry_lost, callback)
+    if sol.wcs is not None and len(xy) >= min_sources:
+        n = len(xy)
+        xy = numpy.asarray(xy)
+        flux = numpy.asarray(flux)
+        ra, dec = numpy.deg2rad(sol.wcs.all_pix2world(xy[:, 0], xy[:, 1], 1))
+        radius = numpy.rad2deg((dec.max() - dec.min())/2)
+        for ra0, dec0, r0 in engine.globs:
+            r = r0*initial_radius
+            found = False
+            prev_num_outer = None
+            while True:
+                inner = 2*numpy.arcsin(numpy.sqrt(numpy.clip(
+                    numpy.cos(dec0)*numpy.cos(dec)*numpy.sin((ra0 - ra)/2)**2 +
+                    numpy.sin((dec0 - dec)/2)**2, 0, 1))) < r
+                num_inner = inner.sum()
+                if not num_inner:
+                    # No sources within the current glob radius
+                    break
+
+                found = True
+
+                outer = ~inner
+                num_outer = n - num_inner
+                if num_outer >= min_sources and num_outer != prev_num_outer:
+                    # Repeat solution keeping only sources outside the glob
+                    prev_num_outer = num_outer
+                    new_sol = solve_field(
+                        engine, xy[outer], flux[outer], width, height,
+                        sol.wcs.wcs.crval[0]/15, sol.wcs.wcs.crval[1], radius,
+                        min_scale, max_scale, parity, 0, crpix_center,
+                        max_sources, False, callback)
+                    if new_sol.wcs is not None:
+                        # New solution found with outer sources only
+                        sol = new_sol
+                        break
+
+                # Not enough stars or solution failed? Decrease the radius.
+                r *= radius_step
+            if found:
+                break
+    return sol

@@ -245,6 +245,9 @@ numpy.distutils.core.setup(
         'skylib.extraction', 'skylib.io', 'skylib.photometry',
         'skylib.sonification', 'skylib.util'],
     ext_modules=[an_engine_ext, rcrlib_ext],
-    package_data={'skylib.sonification': ['*.wav']},
+    package_data={
+        'skylib.sonification': ['*.wav'],
+        'skylib.astrometry': ['ngc2000.dat'],
+    },
     scripts=['scripts/fits2wav.py'],
 )

@@ -3,5 +3,6 @@ include skylib/astrometry/*.i
 recursive-include skylib/thirdparty/astrometry.net *
 recursive-include skylib/thirdparty/anet_extra *
 include skylib/sonification/*.wav
+include skylib/astrometry/ngc2000.dat
 prune */.git
 exclude .gitignore
