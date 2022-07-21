@@ -31,9 +31,9 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
 
     :param img: input image as 2D NumPy array
     :param src_stars: list of (X, Y) coordinates of one or more alignment stars
-        in the image being aligned
+        in the image being aligned, 1-based
     :param dst_stars: list of (X, Y) coordinates of the same stars as in
-        `src_stars` in the reference image
+        `src_stars` in the reference image, 1-based
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
     :param prefilter: apply spline filter before interpolation
@@ -42,8 +42,9 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
     """
     nref = min(len(src_stars), len(dst_stars))
 
-    src_x, src_y = transpose(src_stars[:nref])
-    dst_x, dst_y = transpose(dst_stars[:nref])
+    # Convert to 0-based, as needed by SciPy
+    src_x, src_y = transpose(src_stars[:nref]) - 1
+    dst_x, dst_y = transpose(dst_stars[:nref]) - 1
 
     # Pad the image if smaller than the reference image
     h, w = img.shape
@@ -217,8 +218,12 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
         dst_x, dst_y = mgrid[:ref_width:(nx + 2)*1j, :ref_height:(ny + 2)*1j]
         dst_x, dst_y = dst_x[1:-1].ravel(), dst_y[1:-1].ravel()
 
-    a, d = dst_wcs.all_pix2world(dst_x, dst_y, 0)
-    src_x, src_y = src_wcs.all_world2pix(a, d, 0, quiet=True)
+    # Convert to 1-based (required by apply_transform_stars()
+    dst_x += 1
+    dst_y += 1
+
+    a, d = dst_wcs.all_pix2world(dst_x, dst_y, 1)
+    src_x, src_y = src_wcs.all_world2pix(a, d, 1, quiet=True)
 
     img = apply_transform_stars(
         img, transpose([src_x, src_y]), transpose([dst_x, dst_y]),
