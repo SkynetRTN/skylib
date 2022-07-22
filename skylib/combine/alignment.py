@@ -9,8 +9,8 @@ Image alignment.
 from typing import List as TList, Tuple, Union
 
 from numpy import (
-    array, empty, float32, full, indices, ma, mgrid, ndarray, ones, sqrt,
-    transpose, zeros)
+    arctan2, array, cos, empty, float32, full, indices, ma, mgrid, ndarray,
+    ones, sin, sqrt, transpose, zeros)
 from numpy.linalg import lstsq
 import scipy.ndimage
 from astropy.wcs import WCS
@@ -19,13 +19,17 @@ from astropy.wcs import WCS
 __all__ = ['apply_transform_stars', 'apply_transform_wcs']
 
 
+# noinspection SpellCheckingInspection
 def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
                           src_stars: Union[TList[Tuple[float, float]],
                                            ndarray],
                           dst_stars: Union[TList[Tuple[float, float]],
                                            ndarray],
                           ref_width: int, ref_height: int,
-                          prefilter: bool = True) -> ma.MaskedArray:
+                          prefilter: bool = True,
+                          enable_rot: bool = True,
+                          enable_scale: bool = True,
+                          enable_skew: bool = True) -> ma.MaskedArray:
     """
     Align an image based on pixel coordinates of one or more stars
 
@@ -37,6 +41,10 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
     :param prefilter: apply spline filter before interpolation
+    :param enable_rot: allow rotation transformation for >= 2 points
+    :param enable_scale: allow scaling transformation for >= 2 points
+    :param enable_skew: allow skew transformation for >= 2 points; ignored
+        and set to False if `enable_rot`=False or `enable_scale`=False
 
     :return: transformed image
     """
@@ -68,37 +76,110 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
     else:
         mask = zeros(img.shape, float32)
 
-    if nref == 1:
+    if not enable_rot or not enable_scale:
+        enable_skew = False
+
+    if nref == 1 or not enable_rot and not enable_scale:
         # Pure shift
         offset = [dst_y[0] - src_y[0], dst_x[0] - src_x[0]]
         img = scipy.ndimage.shift(
             img, offset, mode='nearest', prefilter=prefilter)
-        mask = scipy.ndimage.shift(mask, offset, cval=True, prefilter=prefilter)
+        mask = scipy.ndimage.shift(
+            mask, offset, cval=True, prefilter=prefilter)
+
     else:
-        if nref == 2:
-            # Partial affine transform (shift + rotation + uniform scale)
-            # [ src_y ]   [  A B ] [ dst_y ]   [ dy ]
-            # [ src_x ] = [ -B A ] [ dst_x ] + [ dx ]
-            src_dy, src_dx = src_y[0] - src_y[1], src_x[0] - src_x[1]
-            dst_dy, dst_dx = dst_y[0] - dst_y[1], dst_x[0] - dst_x[1]
-            d = dst_dx**2 + dst_dy**2
-            if not d:
-                raise ValueError(
-                    'Both alignment stars have the same coordinates')
-            a = (src_dy*dst_dy + src_dx*dst_dx)/d
-            b = (src_dy*dst_dx - src_dx*dst_dy)/d
+        for i in range(nref - 1):
+            x0, y0 = dst_x[i], dst_y[i]
+            for j in range(i + 1, nref):
+                if (dst_x[j] - x0)**2 + (dst_y[j] - y0)**2 <= 0:
+                    raise ValueError(
+                        'Two or more reference stars have equal coordinates')
+
+        if enable_rot and not enable_scale:
+            # 2+ stars, shift + rotation, overdetermined solution:
+            #   [ src_y ]   [  A b ] [ dst_y ]   [ dy ]
+            #   [ src_x ] = [ -b A ] [ dst_x ] + [ dx ],
+            #   A = cos(phi), b = sin(phi)
+            src_dy, src_dx = src_y[:-1] - src_y[1:], src_x[:-1] - src_x[1:]
+            dst_dy, dst_dx = dst_y[:-1] - dst_y[1:], dst_x[:-1] - dst_x[1:]
+            phi = arctan2(
+                src_dy*dst_dx - src_dx*dst_dy,
+                src_dy*dst_dy + src_dx*dst_dx).mean()
+            a, b = cos(phi), sin(phi)
             mat = array([[a, b], [-b, a]])
-            offset = [src_y[0] - dst_y[0]*a - dst_x[0]*b,
-                      src_x[0] - dst_x[0]*a + dst_y[0]*b]
+            offset = [(src_y - a*dst_y - b*dst_x).mean(),
+                      (src_x - a*dst_x + b*dst_y).mean()]
+
+        elif nref == 2:
+            # Can do only partial affine transform, always exact solution
+            if not enable_rot:
+                # 2 stars, shift + scale:
+                #   [ src_y ]   [ A 0 ] [ dst_y ]   [ dy ]
+                #   [ src_x ] = [ 0 B ] [ dst_x ] + [ dx ]
+                dst_dy, dst_dx = dst_y[0] - dst_y[1], dst_x[0] - dst_x[1]
+                if dst_dy:
+                    a = (src_y[0] - src_y[1])/dst_dy
+                else:
+                    a = 1
+                if dst_dx:
+                    b = (src_x[0] - src_x[1])/dst_dx
+                else:
+                    b = 1
+                mat = array([[a, 0], [0, b]])
+                offset = [src_y[0] - a*dst_y[0], src_x[0] - b*dst_x[0]]
+            else:
+                # 2 stars, shift + rotation + uniform scale:
+                #   [ src_y ]   [  A B ] [ dst_y ]   [ dy ]
+                #   [ src_x ] = [ -B A ] [ dst_x ] + [ dx ]
+                src_dy, src_dx = src_y[0] - src_y[1], src_x[0] - src_x[1]
+                dst_dy, dst_dx = dst_y[0] - dst_y[1], dst_x[0] - dst_x[1]
+                d = dst_dx**2 + dst_dy**2
+                a = (src_dy*dst_dy + src_dx*dst_dx)/d
+                b = (src_dy*dst_dx - src_dx*dst_dy)/d
+                mat = array([[a, b], [-b, a]])
+                offset = [src_y[0] - dst_y[0]*a - dst_x[0]*b,
+                          src_x[0] - dst_x[0]*a + dst_y[0]*b]
+
+        elif not enable_rot:
+            # 3+ stars, shift + scale:
+            #   [ src_y ]   [ A 0 ] [ dst_y ]   [ dy ]
+            #   [ src_x ] = [ 0 B ] [ dst_x ] + [ dx ]
+            py = lstsq(transpose([dst_y, ones(nref)]), src_y, rcond=None)[0]
+            px = lstsq(transpose([dst_x, ones(nref)]), src_x, rcond=None)[0]
+            mat = array([[py[0], 0], [0, px[0]]])
+            offset = [py[1], px[1]]
+
+        elif not enable_skew:
+            # 3+ stars, shift + rotation + scale:
+            #   [ src_y ]   [ A B ] [ dst_y ]   [ dy ]
+            #   [ src_x ] = [ c D ] [ dst_x ] + [ dx ],
+            #   c = -B*D/A if A != 0 or
+            #   [ src_y ]   [ 0 B ] [ dst_y ]   [ dy ]
+            #   [ src_x ] = [ C 0 ] [ dst_x ] + [ dx ]  otherwise
+            a, b, dy = lstsq(
+                transpose([dst_y, dst_x, ones(nref)]), src_y, rcond=None)[0]
+            if a:
+                d, dx = lstsq(
+                    transpose([-b/a*dst_y + dst_x, ones(nref)]), src_x,
+                    rcond=None)[0]
+                c = -b/a*d
+            else:
+                c, dx = lstsq(
+                    transpose([dst_y, ones(nref)]), src_x, rcond=None)[0]
+                d = 0
+            mat = array([[a, b], [c, d]])
+            offset = [dy, dx]
+
         else:
-            # Full affine transform
-            # [ src_y ]   [ A B ] [ dst_y ]   [ dy ]
-            # [ src_x ] = [ C D ] [ dst_x ] + [ dx ]
+            # 3+ stars, full affine transform:
+            #   [ src_y ]   [ A B ] [ dst_y ]   [ dy ]
+            #   [ src_x ] = [ C D ] [ dst_x ] + [ dx ]
             a = transpose([dst_y, dst_x, ones(nref)])
             py = lstsq(a, src_y, rcond=None)[0]
             px = lstsq(a, src_x, rcond=None)[0]
             mat = array([py[:2], px[:2]])
             offset = [py[2], px[2]]
+
         img = scipy.ndimage.affine_transform(
             img, mat, offset, mode='nearest', prefilter=prefilter)
         mask = scipy.ndimage.affine_transform(
@@ -138,7 +219,10 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
                         src_wcs: WCS, dst_wcs: WCS,
                         ref_width: int, ref_height: int,
                         grid_points: int = 0,
-                        prefilter: bool = False) -> ma.MaskedArray:
+                        prefilter: bool = False,
+                        enable_rot: bool = True,
+                        enable_scale: bool = True,
+                        enable_skew: bool = True) -> ma.MaskedArray:
     """
     Align an image based on WCS
 
@@ -148,12 +232,16 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
     :param grid_points: number of grid points for WCS interpolation::
-        0: transform using WCS calculated for each pixel
+        0: full affine transform using WCS calculated for each pixel (slow)
         1: offset-only alignment using central pixel
         2: shift + rotation + uniform scale (2-star) alignment using two points
         >= 3: full affine transform using the given number of fake "alignment
             stars" generated from the WCS
     :param prefilter: apply spline filter before interpolation
+    :param enable_rot: allow rotation transformation for `grid_points` >= 2
+    :param enable_scale: allow scaling transformation for `grid_points` >= 2
+    :param enable_skew: allow skew transformation for `grid_points` >= 2;
+        ignored and set to False if `enable_rot`=False or `enable_scale`=False
 
     :return: transformed image
     """
@@ -227,7 +315,8 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
 
     img = apply_transform_stars(
         img, transpose([src_x, src_y]), transpose([dst_x, dst_y]),
-        ref_width, ref_height, prefilter=prefilter)
+        ref_width, ref_height, prefilter=prefilter, enable_rot=enable_rot,
+        enable_scale=enable_scale, enable_skew=enable_skew)
 
     # Match the reference image size
     if w > ref_width or h > ref_height:
