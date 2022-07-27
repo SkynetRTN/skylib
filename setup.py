@@ -242,8 +242,8 @@ numpy.distutils.core.setup(
     provides='skylib',
     packages=[
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine',
-        'skylib.extraction', 'skylib.io', 'skylib.photometry',
-        'skylib.sonification', 'skylib.util'],
+        'skylib.enhancement', 'skylib.extraction', 'skylib.io',
+        'skylib.photometry', 'skylib.sonification', 'skylib.util'],
     ext_modules=[an_engine_ext, rcrlib_ext],
     package_data={
         'skylib.sonification': ['*.wav'],
