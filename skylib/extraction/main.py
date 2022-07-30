@@ -19,9 +19,8 @@ from astropy.convolution import Gaussian2DKernel, Kernel2D
 from astropy.modeling.models import Gaussian2D
 import sep
 
-from skylib.extraction.centroiding import centroid_sources
-
 from ..calibration.background import estimate_background, sep_compatible
+from .centroiding import centroid_sources
 
 
 __all__ = [

@@ -1,0 +1,11 @@
+astroscrappy == 1.1.0
+astropy == 4.3.1
+astroquery == 0.4.6
+llvmlite==0.39.0
+matplotlib == 3.5.2
+numba==0.56.0
+numpy == 1.22.2
+photutils == 1.5.0
+Pillow == 9.0.1
+scipy == 1.8.0
+sep == 1.0.3
