@@ -286,12 +286,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
             default: not set
         `rejection` = "sigclip": reject values more than `hi` sigmas above the
             baseline; default: 3
-    :param smart_stacking: enable smart stacking ("lucky imaging"):
-        automatically exclude those images from the stack that will not improve
-        its quality in a certain sense; currently supported modes:
+    :param smart_stacking: enable smart stacking: automatically exclude those
+        images from the stack that will not improve its quality in a certain
+        sense; currently supported modes:
             "SNR": don't include image if it won't improve the resulting
                 signal-to-noise ratio of sources; suitable for deep-sky imaging
                 to reject images taken through clouds or with bad alignment
+            "sharpness": don't include image if it will not improve sharpness
         WARNING. Enabling smart stacking may dramatically increase
                  the processing time.
     :param max_mem_mb: maximum amount of RAM in megabytes to use during
