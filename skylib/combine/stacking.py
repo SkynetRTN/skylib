@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple, Union
 
 from numpy import (
     argmax, array, bincount, full, indices, int32, isnan, ma, median, nan,
-    nanpercentile, ndarray, percentile as np_percentile)
+    nanpercentile, ndarray, percentile as np_percentile, zeros_like)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -229,12 +229,20 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     res = median(datacube, 0)
             else:
                 if isinstance(datacube, ma.MaskedArray):
-                    res = nanpercentile(
-                        datacube.filled(nan), percentile, 0)
+                    res = ma.masked_array(
+                        nanpercentile(datacube.filled(nan), percentile, 0),
+                        zeros_like(datacube[0], bool))
+                    res[isnan(res)] = True
                 else:
                     res = np_percentile(datacube, percentile, 0)
         else:
             raise ValueError('Unknown stacking mode "{}"'.format(mode))
+
+        if isinstance(res, ma.MaskedArray):
+            # Mask all elements that are masked in the input arrays
+            for data in datacube:
+                res.mask |= data.mask
+
         chunks.append(res)
 
         if callback is not None:
@@ -249,7 +257,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     else:
         res = chunks[0]
     if isinstance(res, ma.MaskedArray) and (
-            res.mask is None or not res.mask.any()):
+            res.mask is None or res.mask is False or not res.mask.any()):
         res = res.data
     return res, rej_percent
 
