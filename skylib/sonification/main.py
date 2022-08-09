@@ -140,7 +140,7 @@ def sonify_image(img, outfile, coord='rect', barycenter=False, tempo=100.0,
         noise_map = None
     img -= bkg + rms*threshold
     if isinstance(img, ma.MaskedArray):
-        perc = nanpercentile(ma.filled(img, nan), hi_clip)
+        perc = nanpercentile(img.filled(nan), hi_clip)
     else:
         perc = percentile(img, hi_clip)
     img = img.clip(0, perc)
