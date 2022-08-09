@@ -13,7 +13,7 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, full, indices, int32, ma, median, nan,
+    argmax, array, bincount, full, indices, int32, isnan, ma, median, nan,
     nanpercentile, ndarray, percentile as np_percentile)
 import astropy.io.fits as pyfits
 
@@ -132,10 +132,21 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 if ki != k_ref:
                     data *= k_ref/ki
 
+        # Convert NaNs to masked values
+        for i, data in enumerate(datacube):
+            if isnan(data).any():
+                if not isinstance(data, ma.MaskedArray):
+                    data = ma.masked_array(
+                        data, full(data.shape, False), fill_value=nan)
+                elif not data.mask.shape:
+                    data.mask = full(data.shape, data.mask)
+                data.mask[isnan(data)] = True
+                datacube[i] = data
+
         # Reject outliers
         if rejection or any(isinstance(data, ma.MaskedArray)
                             for data in datacube):
-            datacube = ma.masked_array(datacube)
+            datacube = ma.masked_array(datacube, fill_value=nan)
             if not datacube.mask.shape:
                 # No initially masked data, but we'll need an array instead
                 # of mask=False to do slicing operations
