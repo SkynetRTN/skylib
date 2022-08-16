@@ -13,8 +13,9 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, full, indices, int32, isnan, ma, median, nan,
-    nanpercentile, ndarray, percentile as np_percentile, zeros_like)
+    argmax, array, bincount, full, indices, int32, isnan, logical_or, ma,
+    median, nan, nanpercentile, ndarray, percentile as np_percentile,
+    zeros_like)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -143,7 +144,6 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data.mask[isnan(data)] = True
                 datacube[i] = data
 
-        # Reject outliers
         if rejection or any(isinstance(data, ma.MaskedArray)
                             for data in datacube):
             datacube = ma.masked_array(datacube, fill_value=nan)
@@ -151,8 +151,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 # No initially masked data, but we'll need an array instead
                 # of mask=False to do slicing operations
                 datacube.mask = full(datacube.shape, datacube.mask)
+
+            # After stacking (and possibly rejection), we'll mask all pixels
+            # that are initially masked in at least one image
+            # (e.g. edges/corners after alignment)
+            initial_mask = logical_or.reduce(datacube.mask, axis=0)
+            if not initial_mask.any():
+                initial_mask = None
         else:
             datacube = array(datacube)
+            initial_mask = None
 
         if rejection == 'chauvenet':
             datacube.mask = chauvenet(datacube, min_vals=min_keep)
@@ -238,10 +246,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         else:
             raise ValueError('Unknown stacking mode "{}"'.format(mode))
 
-        if isinstance(res, ma.MaskedArray):
-            # Mask all elements that are masked in the input arrays
-            for data in datacube:
-                res.mask |= data.mask
+        if isinstance(res, ma.MaskedArray) and initial_mask is not None:
+            # OR rejection mask with the OR of pre-rejection masks
+            res.mask |= initial_mask
 
         chunks.append(res)
 
