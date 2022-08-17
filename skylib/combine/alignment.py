@@ -9,14 +9,19 @@ Image alignment.
 from typing import List as TList, Tuple, Union
 
 from numpy import (
-    arctan2, array, cos, empty, float32, full, indices, ma, mgrid, ndarray,
-    ones, sin, sqrt, transpose, zeros)
-from numpy.linalg import lstsq
+    arctan2, argsort, array, bincount, cos, dot, empty, float32, full,
+    gradient, hypot, indices, ma, mgrid, ndarray, ones, sin, sqrt, transpose,
+    uint8, zeros)
+from numpy.linalg import inv, lstsq
 import scipy.ndimage
 from astropy.wcs import WCS
+import cv2 as cv
 
 
-__all__ = ['apply_transform_stars', 'apply_transform_wcs']
+__all__ = [
+    'apply_transform_stars', 'apply_transform_wcs', 'apply_transform_features',
+    'apply_transform_pixel',
+]
 
 
 # noinspection SpellCheckingInspection
@@ -70,8 +75,11 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
 
     if isinstance(img, ma.MaskedArray) and img.mask.any():
         # scipy.ndimage does not handle masked arrays; fill masked values with
-        # global mean and mask them afterwards after transformation
-        mask = img.mask.astype(float32)
+        # global mean and mask them after transformation
+        if img.mask.shape:
+            mask = img.mask.astype(float32)
+        else:
+            mask = full(img.shape, img.mask, float32)
         img = img.filled(avg)
     else:
         mask = zeros(img.shape, float32)
@@ -323,3 +331,303 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
         img = img[:ref_height, :ref_width]
 
     return img
+
+
+def apply_transform_features(img: Union[ndarray, ma.MaskedArray],
+                             ref_img: Union[ndarray, ma.MaskedArray],
+                             prefilter: bool = True,
+                             enable_rot: bool = True,
+                             enable_scale: bool = True,
+                             enable_skew: bool = True,
+                             algorithm: str = 'AKAZE',
+                             ratio_threshold: float = 0.7,
+                             detect_edges: bool = False,
+                             **kwargs) -> ma.MaskedArray:
+    """
+    Align an image based on feature similarity
+
+    :param img: input image as 2D NumPy array
+    :param ref_img: reference image
+    :param prefilter: apply spline filter before interpolation
+    :param enable_rot: allow rotation transformation for >= 2 points
+    :param enable_scale: allow scaling transformation for >= 2 points
+    :param enable_skew: allow skew transformation for >= 2 points; ignored
+        and set to False if `enable_rot`=False or `enable_scale`=False
+    :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK",
+        "KAZE", "ORB", "SIFT"; more are available if OpenCV contribution
+        modules are installed: "SURF" (patented, not always available);
+        for more info, see OpenCV docs
+    :param ratio_threshold: Lowe's feature match test factor
+    :param detect_edges: apply edge detection before feature extraction
+    :param kwargs: extra feature detector-specific keyword arguments
+
+    :return: transformed image
+    """
+    if detect_edges:
+        img = hypot(
+            scipy.ndimage.sobel(img, 0, mode='nearest'),
+            scipy.ndimage.sobel(img, 1, mode='nearest')
+        )
+        ref_img = hypot(
+            scipy.ndimage.sobel(ref_img, 0, mode='nearest'),
+            scipy.ndimage.sobel(ref_img, 1, mode='nearest')
+        )
+
+    # Convert both images to [0,255) grayscale
+    src_img = img
+    mn, mx = src_img.min(), src_img.max()
+    if isinstance(src_img, ma.MaskedArray):
+        src_img = src_img.filled(mn)
+    if mn >= mx:
+        raise ValueError('Empty image')
+    src_img = ((src_img - mn)/(mx - mn)*255 + 0.5).astype(uint8)
+
+    dst_img = ref_img
+    mn, mx = dst_img.min(), dst_img.max()
+    if isinstance(dst_img, ma.MaskedArray):
+        dst_img = dst_img.filled(mn)
+    if mn >= mx:
+        raise ValueError('Empty reference image')
+    dst_img = ((dst_img - mn)/(mx - mn)*255 + 0.5).astype(uint8)
+
+    # Extract features
+    if algorithm == 'AKAZE':
+        fe = cv.AKAZE_create(**kwargs)
+    elif algorithm == 'BRISK':
+        fe = cv.BRISK_create(**kwargs)
+    elif algorithm == 'KAZE':
+        fe = cv.KAZE_create(**kwargs)
+    elif algorithm == 'ORB':
+        fe = cv.ORB_create(**kwargs)
+    elif algorithm == 'SIFT':
+        fe = cv.SIFT_create(**kwargs)
+    elif algorithm == 'SURF':
+        fe = cv.xfeatures2d.SURF_create(**kwargs)
+    else:
+        raise ValueError(
+            'Unknown feature detection algorithm "{}"'.format(algorithm))
+    kp1, des1 = fe.detectAndCompute(src_img, None)
+    kp2, des2 = fe.detectAndCompute(dst_img, None)
+
+    # Cross-match features
+    matcher = cv.BFMatcher(
+        cv.NORM_L2 if algorithm in ('KAZE', 'SIFT', 'SURF')
+        else cv.NORM_HAMMING2
+        if algorithm == 'ORB' and kwargs.get('WTA_K', 2) in (3, 4)
+        else cv.NORM_HAMMING)
+    matches = matcher.knnMatch(des1, des2, k=2)
+
+    # Filter matches using Lowe's ratio test
+    good_matches = []
+    for m, n in matches:
+        if m.distance < ratio_threshold*n.distance:
+            good_matches.append(m)
+    if not good_matches:
+        raise ValueError('No matching features found')
+
+    # Keep only one unique match for each reference feature
+    ref_idx = array([m.trainIdx for m in good_matches])
+    distances = array([m.distance for m in good_matches])
+    min_idx = ref_idx.min(initial=0)
+    num_matches = bincount(ref_idx - min_idx)
+    unique_matches = list(good_matches)
+    for i, n in enumerate(num_matches):
+        if n > 1:
+            conflicts = (ref_idx == i + min_idx).nonzero()[0]
+            for j in argsort(distances[conflicts])[1:]:
+                unique_matches.remove(good_matches[conflicts[j]])
+
+    # Extract coordinates and align based on matched sources
+    return apply_transform_stars(
+        img,
+        array([kp1[m.queryIdx].pt for m in unique_matches]) + 1,
+        array([kp2[m.trainIdx].pt for m in unique_matches]) + 1,
+        ref_img.shape[1], ref_img.shape[0],
+        prefilter=prefilter,
+        enable_rot=enable_rot,
+        enable_scale=enable_scale,
+        enable_skew=enable_skew,
+    )
+
+
+# noinspection PyPep8Naming
+def apply_transform_pixel(img: Union[ndarray, ma.MaskedArray],
+                          ref_img: Union[ndarray, ma.MaskedArray],
+                          prefilter: bool = True,
+                          enable_rot: bool = True,
+                          enable_scale: bool = True,
+                          enable_skew: bool = True,
+                          detect_edges: bool = False) -> ma.MaskedArray:
+    """
+    Align an image based on direct pixel-based registration
+
+    :param img: input image as 2D NumPy array
+    :param ref_img: reference image
+    :param prefilter: apply spline filter before interpolation
+    :param enable_rot: allow rotation transformation for >= 2 points
+    :param enable_scale: allow scaling transformation for >= 2 points
+    :param enable_skew: allow skew transformation for >= 2 points; ignored
+        and set to False if `enable_rot`=False or `enable_scale`=False
+    :param detect_edges: apply edge detection before gradient
+
+    :return: transformed image
+    """
+    if isinstance(img, ma.MaskedArray) and img.mask.any():
+        # scipy.ndimage does not handle masked arrays; fill masked values
+        # with global mean and mask them after transformation
+        if img.mask.shape:
+            mask = img.mask.astype(float32)
+        else:
+            mask = full(img.shape, img.mask, float32)
+        img = img.filled(img.mean())
+    else:
+        mask = zeros(img.shape, float32)
+    if isinstance(ref_img, ma.MaskedArray) and ref_img.mask.any():
+        mask |= ref_img.mask
+
+    if detect_edges:
+        img = hypot(
+            scipy.ndimage.sobel(img, 0, mode='nearest'),
+            scipy.ndimage.sobel(img, 1, mode='nearest')
+        )
+        ref_img = hypot(
+            scipy.ndimage.sobel(ref_img, 0, mode='nearest'),
+            scipy.ndimage.sobel(ref_img, 1, mode='nearest')
+        )
+
+    # The code below is ported from cv2.reg
+    grady, gradx = gradient(ref_img)
+    diff = ref_img - img
+    diff[mask.nonzero()] = 0
+    grid_r, grid_c = indices(img.shape) + 1
+
+    if enable_rot and enable_scale and not enable_skew:
+        # Similarity transform: rotation + uniform scale
+        xIx_p_yIy = grid_c*gradx + grid_r*grady
+        yIx_m_xIy = grid_r*gradx - grid_c*grady
+        A = empty([4, 4], float)
+        A[0, 0] = (xIx_p_yIy**2).sum()
+        A[0, 1] = (xIx_p_yIy*yIx_m_xIy).sum()
+        A[0, 2] = (gradx*xIx_p_yIy).sum()
+        A[0, 3] = (grady*xIx_p_yIy).sum()
+        A[1, 1] = (yIx_m_xIy**2).sum()
+        A[1, 2] = (gradx*yIx_m_xIy).sum()
+        A[1, 3] = (grady*yIx_m_xIy).sum()
+        A[2, 2] = (gradx**2).sum()
+        A[2, 3] = (gradx*grady).sum()
+        A[3, 3] = (grady**2).sum()
+
+        # Lower half values (A is symmetric)
+        for i in range(1, 4):
+            for j in range(i):
+                A[i, j] = A[j, i]
+
+        # Calculation of b
+        b = [
+            -(diff*xIx_p_yIy).sum(),
+            -(diff*yIx_m_xIy).sum(),
+            -(diff*gradx).sum(),
+            -(diff*grady).sum(),
+        ]
+
+        # Calculate affine transformation
+        k = dot(inv(A), b)
+        mat = array([[k[0] + 1, k[1]], [-k[1], k[0] + 1]])
+        offset = [k[2], k[3]]
+
+    elif enable_rot and not enable_scale:
+        # Euclidean transform: rotation only
+        xIy_yIx = grid_c*grady - grid_r*gradx
+        A = empty([3, 3], float)
+        A[0, 0] = (gradx**2).sum()
+        A[0, 1] = A[1, 0] = (gradx*grady).sum()
+        A[0, 2] = A[2, 0] = (gradx*xIy_yIx).sum()
+        A[1, 1] = (grady**2).sum()
+        A[1, 2] = A[2, 1] = (grady*xIy_yIx).sum()
+        A[2, 2] = (xIy_yIx**2).sum()
+
+        b = [
+            -(diff*gradx).sum(),
+            -(diff*grady).sum(),
+            -(diff*xIy_yIx).sum(),
+        ]
+
+        # Calculate affine transformation
+        k = dot(inv(A), b)
+        c = cos(k[2])
+        s = sin(k[2])
+        mat = array([[c, -s], [s, c]])
+        offset = [k[0], k[1]]
+
+    elif not enable_rot:
+        # Shift-only transform
+        A = empty([2, 2], float)
+        A[0, 0] = (gradx**2).sum()
+        A[0, 1] = A[1, 0] = (gradx*grady).sum()
+        A[1, 1] = (grady**2).sum()
+
+        b = [
+            -(diff*gradx).sum(),
+            -(diff*grady).sum(),
+        ]
+
+        # Calculate affine transformation
+        offset = dot(inv(A), b)
+        mat = array([[1, 0], [0, 1]])
+
+    else:
+        # Full affine transform
+        xIx = grid_c*gradx
+        xIy = grid_c*grady
+        yIx = grid_r*gradx
+        yIy = grid_r*grady
+        Ix2 = gradx*gradx
+        Iy2 = grady*grady
+        xy = grid_c*grid_r
+        IxIy = gradx*grady
+        A = empty([6, 6], float)
+        A[0, 0] = (xIx**2).sum()
+        A[0, 1] = (xy*Ix2).sum()
+        A[0, 2] = (grid_c*Ix2).sum()
+        A[0, 3] = (grid_c**2*IxIy).sum()
+        A[0, 4] = A[1, 3] = (xy*IxIy).sum()
+        A[0, 5] = A[2, 3] = (grid_c*IxIy).sum()
+        A[1, 1] = (yIx**2).sum()
+        A[1, 2] = (grid_r*Ix2).sum()
+        A[1, 4] = (grid_r**2*IxIy).sum()
+        A[1, 5] = A[2, 4] = (grid_r*IxIy).sum()
+        A[2, 2] = Ix2.sum()
+        A[2, 5] = IxIy.sum()
+        A[3, 3] = (xIy**2).sum()
+        A[3, 4] = (xy*Iy2).sum()
+        A[3, 5] = (grid_c*Iy2).sum()
+        A[4, 4] = (yIy**2).sum()
+        A[4, 5] = (grid_r*Iy2).sum()
+        A[5, 5] = Iy2.sum()
+        # Lower half values (A is symmetric)
+        for i in range(1, 6):
+            for j in range(i):
+                A[i, j] = A[j, i]
+
+        # Calculation of b
+        b = [
+            -(diff*xIx).sum(),
+            -(diff*yIx).sum(),
+            -(diff*gradx).sum(),
+            -(diff*xIy).sum(),
+            -(diff*yIy).sum(),
+            -(diff*grady).sum(),
+        ]
+
+        # Calculate affine transformation
+        k = dot(inv(A), b)
+        mat = array([[k[0] + 1, k[1]], [k[3], k[4] + 1]])
+        offset = [k[2], k[5]]
+
+    print(mat, offset)
+    img = scipy.ndimage.affine_transform(
+        img, mat, offset, mode='nearest', prefilter=prefilter)
+    mask = scipy.ndimage.affine_transform(
+        mask, mat, offset, cval=True, prefilter=prefilter) > 0.06
+
+    return ma.masked_array(img, mask, fill_value=img.mean())
