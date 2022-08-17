@@ -24,6 +24,46 @@ __all__ = [
 ]
 
 
+def match_ref_shape(img: Union[ndarray, ma.MaskedArray],
+                    ref_width: int, ref_height: int) \
+        -> Tuple[ndarray, ndarray, float]:
+    """
+    Pad the image to match the reference image shape
+
+    :param img: input image
+    :param ref_width: reference image width
+    :param ref_height: reference image height
+
+    :return: padded image, its mask as float32, and the original image average
+    """
+    h, w = img.shape
+    avg = img.mean()
+
+    if w < ref_width or h < ref_height:
+        new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
+        mask = ones(new_img.shape, bool)
+        if isinstance(img, ma.MaskedArray) and img.mask.any():
+            new_img[:h, :w] = img.data
+            mask[:h, :w] = img.mask
+        else:
+            new_img[:h, :w] = img
+            mask[:h, :w] = False
+        img = ma.MaskedArray(new_img, mask)
+
+    if isinstance(img, ma.MaskedArray) and img.mask.any():
+        # scipy.ndimage does not handle masked arrays; fill masked values with
+        # global mean and mask them after transformation
+        if img.mask.shape:
+            mask = img.mask.astype(float32)
+        else:
+            mask = full(img.shape, img.mask, float32)
+        img = img.filled(avg)
+    else:
+        mask = zeros(img.shape, float32)
+
+    return img, mask, avg
+
+
 # noinspection SpellCheckingInspection
 def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
                           src_stars: Union[TList[Tuple[float, float]],
@@ -60,29 +100,7 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
     dst_x, dst_y = transpose(dst_stars[:nref]) - 1
 
     # Pad the image if smaller than the reference image
-    h, w = img.shape
-    avg = img.mean()
-    if w < ref_width or h < ref_height:
-        new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
-        if isinstance(img, ma.MaskedArray) and img.mask.any():
-            new_img[:h, :w] = img.data
-            mask = ones([ref_height, ref_width], bool)
-            mask[:h, :w] = img.mask
-            img = ma.MaskedArray(new_img, mask)
-        else:
-            new_img[:h, :w] = img
-            img = new_img
-
-    if isinstance(img, ma.MaskedArray) and img.mask.any():
-        # scipy.ndimage does not handle masked arrays; fill masked values with
-        # global mean and mask them after transformation
-        if img.mask.shape:
-            mask = img.mask.astype(float32)
-        else:
-            mask = full(img.shape, img.mask, float32)
-        img = img.filled(avg)
-    else:
-        mask = zeros(img.shape, float32)
+    img, mask, avg = match_ref_shape(img, ref_width, ref_height)
 
     if not enable_rot or not enable_scale:
         enable_skew = False
@@ -93,7 +111,7 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
         img = scipy.ndimage.shift(
             img, offset, mode='nearest', prefilter=prefilter)
         mask = scipy.ndimage.shift(
-            mask, offset, cval=True, prefilter=prefilter)
+            mask, offset, cval=1, prefilter=prefilter)
 
     else:
         for i in range(nref - 1):
@@ -191,14 +209,12 @@ def apply_transform_stars(img: Union[ndarray, ma.MaskedArray],
         img = scipy.ndimage.affine_transform(
             img, mat, offset, mode='nearest', prefilter=prefilter)
         mask = scipy.ndimage.affine_transform(
-            mask, mat, offset, cval=True, prefilter=prefilter) > 0.06
+            mask, mat, offset, cval=1, prefilter=prefilter) > 0.06
 
     # Match the reference image size
-    if w > ref_width or h > ref_height:
-        img = img[:ref_height, :ref_width]
-        mask = mask[:ref_height, :ref_width]
-
-    return ma.masked_array(img, mask, fill_value=avg)
+    return ma.masked_array(
+        img[:ref_height, :ref_width], mask[:ref_height, :ref_width],
+        fill_value=avg)
 
 
 wcs_grid = {
@@ -253,30 +269,10 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
 
     :return: transformed image
     """
-    # Pad the image if smaller than the reference image
     h, w = img.shape
-    avg = img.mean()
-    if w < ref_width or h < ref_height:
-        new_img = full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
-        if isinstance(img, ma.MaskedArray) and img.mask.any():
-            new_img[:h, :w] = img.data
-            mask = ones(new_img.shape, bool)
-            mask[:h, :w] = img.mask
-            img = ma.MaskedArray(new_img, mask)
-        else:
-            new_img[:h, :w] = img
-            img = new_img
-
     if grid_points <= 0 or grid_points >= w*h:
-        # Full geometric transform based on WCS
-        if isinstance(img, ma.MaskedArray) and img.mask.any():
-            mask = img.mask.astype(float32)
-            img = img.filled(avg)
-        else:
-            mask = zeros(img.shape, float32)
-
-        # Calculate the transformation row by row to avoid problems
-        # in all_pix2world() for large images
+        # Full geometric transform based on WCS: calculate the transformation
+        # row by row to avoid problems in all_pix2world() for large images
         dst_y, dst_x = indices((ref_height, ref_width))
         coord = empty((2, h, w), float32)
         for i in range(h):
@@ -284,18 +280,16 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
             coord[1, i, :], coord[0, i, :] = src_wcs.all_world2pix(
                 a, d, 0, quiet=True)
 
-        res = ma.MaskedArray(
+        # Match the reference image size and do the transformation
+        img, mask, avg = match_ref_shape(img, ref_width, ref_height)
+        return ma.masked_array(
             scipy.ndimage.map_coordinates(
-                img, coord, mode='nearest', prefilter=prefilter),
+                img, coord, mode='nearest',
+                prefilter=prefilter)[:ref_height, :ref_width],
             scipy.ndimage.map_coordinates(
-                mask, coord, cval=1, prefilter=prefilter) > 0.06,
+                mask, coord, cval=1,
+                prefilter=prefilter)[:ref_height, :ref_width] > 0.06,
             fill_value=avg)
-
-        # Match the reference image size
-        if w > ref_width or h > ref_height:
-            res = res[:ref_height, :ref_width]
-
-        return res
 
     # Calculate fake alignment stars by sampling WCS on a grid
     try:
@@ -321,16 +315,10 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
     a, d = dst_wcs.all_pix2world(dst_x, dst_y, 1)
     src_x, src_y = src_wcs.all_world2pix(a, d, 1, quiet=True)
 
-    img = apply_transform_stars(
+    return apply_transform_stars(
         img, transpose([src_x, src_y]), transpose([dst_x, dst_y]),
         ref_width, ref_height, prefilter=prefilter, enable_rot=enable_rot,
         enable_scale=enable_scale, enable_skew=enable_skew)
-
-    # Match the reference image size
-    if w > ref_width or h > ref_height:
-        img = img[:ref_height, :ref_width]
-
-    return img
 
 
 def apply_transform_features(img: Union[ndarray, ma.MaskedArray],
@@ -472,16 +460,10 @@ def apply_transform_pixel(img: Union[ndarray, ma.MaskedArray],
 
     :return: transformed image
     """
-    if isinstance(img, ma.MaskedArray) and img.mask.any():
-        # scipy.ndimage does not handle masked arrays; fill masked values
-        # with global mean and mask them after transformation
-        if img.mask.shape:
-            mask = img.mask.astype(float32)
-        else:
-            mask = full(img.shape, img.mask, float32)
-        img = img.filled(img.mean())
-    else:
-        mask = zeros(img.shape, float32)
+    ref_height, ref_width = ref_img.shape
+    img, mask = match_ref_shape(img, ref_width, ref_height)[:2]
+    img = img[:ref_height, :ref_width]
+    mask = mask[:ref_height, :ref_width]
     if isinstance(ref_img, ma.MaskedArray) and ref_img.mask.any():
         mask |= ref_img.mask
 
@@ -624,10 +606,9 @@ def apply_transform_pixel(img: Union[ndarray, ma.MaskedArray],
         mat = array([[k[0] + 1, k[1]], [k[3], k[4] + 1]])
         offset = [k[2], k[5]]
 
-    print(mat, offset)
-    img = scipy.ndimage.affine_transform(
-        img, mat, offset, mode='nearest', prefilter=prefilter)
-    mask = scipy.ndimage.affine_transform(
-        mask, mat, offset, cval=True, prefilter=prefilter) > 0.06
-
-    return ma.masked_array(img, mask, fill_value=img.mean())
+    return ma.masked_array(
+        scipy.ndimage.affine_transform(
+            img, mat, offset, mode='nearest', prefilter=prefilter),
+        scipy.ndimage.affine_transform(
+            mask, mat, offset, cval=1, prefilter=prefilter) > 0.06,
+        fill_value=img.mean())
