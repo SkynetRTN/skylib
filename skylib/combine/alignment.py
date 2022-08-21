@@ -269,13 +269,12 @@ def apply_transform_wcs(img: Union[ndarray, ma.MaskedArray],
 
     :return: transformed image
     """
-    h, w = img.shape
-    if grid_points <= 0 or grid_points >= w*h:
+    if grid_points <= 0 or grid_points >= ref_width*ref_height:
         # Full geometric transform based on WCS: calculate the transformation
         # row by row to avoid problems in all_pix2world() for large images
         dst_y, dst_x = indices((ref_height, ref_width))
-        coord = empty((2, h, w), float32)
-        for i in range(h):
+        coord = empty((2, ref_height, ref_width), float32)
+        for i in range(ref_height):
             a, d = dst_wcs.all_pix2world(dst_x[i], dst_y[i], 0)
             coord[1, i, :], coord[0, i, :] = src_wcs.all_world2pix(
                 a, d, 0, quiet=True)
