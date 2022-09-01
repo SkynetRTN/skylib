@@ -32,7 +32,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                        Tuple[ndarray, pyfits.Header]]],
                 mode: str = 'average', scaling: Optional[str] = None,
                 rejection: Optional[str] = None, min_keep: int = 2,
-                percentile: float = 50.0,
+                propagate_mask: bool = True, percentile: float = 50.0,
                 lo: Optional[float] = None, hi: Optional[float] = None,
                 max_mem_mb: float = 100.0,
                 callback: Optional[callable] = None) \
@@ -144,6 +144,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data.mask[isnan(data)] = True
                 datacube[i] = data
 
+        initial_mask = None
         if rejection or any(isinstance(data, ma.MaskedArray)
                             for data in datacube):
             datacube = ma.masked_array(datacube, fill_value=nan)
@@ -152,15 +153,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 # of mask=False to do slicing operations
                 datacube.mask = full(datacube.shape, datacube.mask)
 
-            # After stacking (and possibly rejection), we'll mask all pixels
-            # that are initially masked in at least one image
-            # (e.g. edges/corners after alignment)
-            initial_mask = logical_or.reduce(datacube.mask, axis=0)
-            if not initial_mask.any():
-                initial_mask = None
+            if propagate_mask:
+                # After stacking (and possibly rejection), we'll mask all
+                # pixels that are initially masked in at least one image
+                # (e.g. edges/corners after alignment)
+                initial_mask = logical_or.reduce(datacube.mask, axis=0)
+                if not initial_mask.any():
+                    initial_mask = None
         else:
             datacube = array(datacube)
-            initial_mask = None
 
         if rejection == 'chauvenet':
             datacube.mask = chauvenet(datacube, min_vals=min_keep)
@@ -273,7 +274,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
                                    Tuple[ndarray, pyfits.Header]]],
             mode: str = 'average', scaling: Optional[str] = None,
             rejection: Optional[str] = None, min_keep: int = 2,
-            percentile: float = 50.0,
+            propagate_mask: bool = True, percentile: float = 50.0,
             lo: Optional[float] = None, hi: Optional[float] = None,
             smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
             callback: Optional[callable] = None) \
@@ -299,6 +300,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
         end up in all values rejected for some or even all pixels), "sigclip" -
         iteratively reject pixels below and/or above the baseline
     :param min_keep: minimum values to keep during rejection
+    :param propagate_mask: when combining masked images, mask the output pixel
+        if it's masked in at least one input image
     :param percentile: for `mode`="percentile", default: 50 (median)
     :param lo:
         `rejection` = "iraf": number of lowest values to clip; default: 1
@@ -383,8 +386,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
         # Stack all input images
         res, rej_percent = _do_combine(
             hdu_no, total_progress, progress_step, data_width, data_height,
-            input_data, mode, scaling, rejection, min_keep, percentile, lo, hi,
-            max_mem_mb, callback)
+            input_data, mode, scaling, rejection, min_keep, propagate_mask,
+            percentile, lo, hi, max_mem_mb, callback)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -405,7 +408,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 new_res, new_rej_percent = _do_combine(
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
-                    percentile, lo, hi, max_mem_mb, callback)
+                    propagate_mask, percentile, lo, hi, max_mem_mb, callback)
                 total_progress += progress_step
                 new_score = score_func(new_res)
                 if new_score > score:
