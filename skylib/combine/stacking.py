@@ -54,6 +54,11 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data = f[hdu_no].data
             else:
                 data = f[0]
+            nans = isnan(data)
+            if nans.any():
+                if not isinstance(data, ma.MaskedArray):
+                    data = ma.masked_array(data, zeros_like(data, bool))
+                data.mask[nans] = True
             if scaling == 'average':
                 avg = data.mean()
             elif scaling == 'percentile':
