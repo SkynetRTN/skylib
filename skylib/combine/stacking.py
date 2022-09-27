@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple, Union
 from numpy import (
     argmax, array, bincount, full, indices, int32, isnan, logical_or, ma,
     median, nan, nanpercentile, ndarray, percentile as np_percentile,
-    zeros_like)
+    polyfit, zeros_like)
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -29,7 +29,8 @@ __all__ = ['combine']
 def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data_width: int, data_height: int,
                 input_data: List[Union[pyfits.HDUList,
-                                       Tuple[ndarray, pyfits.Header]]],
+                                       Tuple[Union[ndarray, ma.MaskedArray],
+                                             pyfits.Header]]],
                 mode: str = 'average', scaling: Optional[str] = None,
                 rejection: Optional[str] = None, min_keep: int = 2,
                 propagate_mask: bool = True, percentile: float = 50.0,
@@ -46,9 +47,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     """
     n = len(input_data)
 
-    # Calculate scaling factors
-    k_ref, k, offsets = None, [], []
+    # Calculate offsets and scaling factors
+    k_ref, k, offsets = 1, [1]*n, [0]*n
     if scaling:
+        handled_files = [0]
         for data_no, f in enumerate(input_data):
             if isinstance(f, pyfits.HDUList):
                 data = f[hdu_no].data
@@ -81,29 +83,86 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 avg = argmax(bincount(
                     (data - min_val).clip(0, 2*0x10000 - 1)
                     .astype(int32))) + min_val
+            elif scaling == 'equalize':
+                # Equalize the common image parts; suitable for mosaicing
+                avg = 0
+                for other_data_no, f1 in enumerate(input_data):
+                    if other_data_no == data_no or \
+                            other_data_no in handled_files:
+                        continue
+                    if isinstance(f1, pyfits.HDUList):
+                        other_data = f1[hdu_no].data
+                    else:
+                        other_data = f1[0]
+                    nans = isnan(other_data)
+                    if nans.any():
+                        if not isinstance(other_data, ma.MaskedArray):
+                            other_data = ma.masked_array(
+                                other_data, zeros_like(other_data, bool))
+                        other_data.mask[nans] = True
+                    if isinstance(data, ma.MaskedArray):
+                        if isinstance(other_data, ma.MaskedArray):
+                            intersection = (~data.mask) & (~other_data.mask)
+                        else:
+                            intersection = ~data.mask
+                    elif isinstance(other_data, ma.MaskedArray):
+                        intersection = ~other_data.mask
+                    else:
+                        intersection = array(True)
+                    if not intersection.any():
+                        continue
+                    if intersection.shape:
+                        data1 = data[intersection]
+                        if isinstance(data, ma.MaskedArray):
+                            data1 = data1.data
+                        data2 = other_data[intersection]
+                        if isinstance(data2, ma.MaskedArray):
+                            data2 = data2.data
+                    else:
+                        if isinstance(data, ma.MaskedArray):
+                            data1 = data.data
+                        else:
+                            data1 = data
+                        if isinstance(other_data, ma.MaskedArray):
+                            data2 = other_data.data
+                        else:
+                            data2 = other_data
+                    if len(data1) < 3:
+                        factor, ofs = 1, (data1 - data2).mean()
+                    else:
+                        # noinspection PyTupleAssignmentBalance
+                        factor, ofs = polyfit(data2, data1, 1)
+                    if factor != 0:
+                        k[other_data_no] = k[data_no]/factor
+                        offsets[other_data_no] = \
+                            (ofs + offsets[data_no])/factor
+                        handled_files.append(other_data_no)
             else:
                 raise ValueError(
                     'Unknown scaling mode "{}"'.format(scaling))
 
-            if avg > 0:
-                ofs = 0
-            else:
-                # To make sure that all images are scaled by a positive factor,
-                # add a constant offset to the image so that its average = 1
-                ofs, avg = 1 - avg, 1
-            k.append(avg)
-            offsets.append(ofs)
+            if scaling != 'equalize':
+                if avg > 0:
+                    ofs = 0
+                else:
+                    # To make sure that all images are scaled by a positive
+                    # factor, add a constant offset to the image so that its
+                    # average = 1
+                    ofs, avg = 1 - avg, 1
+                k[data_no] = avg
+                offsets[data_no] = ofs
 
             if callback is not None:
                 callback(progress + (data_no + 1)/n/2*progress_step)
 
-        # Normalize to the first frame with positive average
-        k_ref = k[0]
-        if k_ref == 1:
-            for ki in k[1:]:
-                if ki != 1:
-                    k_ref = ki
-                    break
+        if scaling != 'equalize':
+            # Normalize to the first frame with positive average
+            k_ref = k[0]
+            if k_ref == 1:
+                for ki in k[1:]:
+                    if ki != 1:
+                        k_ref = ki
+                        break
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     rowsize = 0
@@ -130,13 +189,13 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             if isinstance(f, pyfits.HDUList) else f[0][chunk:chunk + chunksize]
             for f in input_data
         ]
-        if scaling:
-            # Scale data
-            for data, ki, ofsi in zip(datacube, k, offsets):
-                if ofsi:
-                    data += ofsi
-                if ki != k_ref:
-                    data *= k_ref/ki
+
+        # Scale data
+        for data, ki, ofsi in zip(datacube, k, offsets):
+            if ofsi:
+                data += ofsi
+            if ki != k_ref:
+                data *= k_ref/ki
 
         # Convert NaNs to masked values
         for i, data in enumerate(datacube):
@@ -276,7 +335,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
 
 def combine(input_data: List[Union[pyfits.HDUList,
-                                   Tuple[ndarray, pyfits.Header]]],
+                                   Tuple[Union[ndarray, ma.MaskedArray],
+                                         pyfits.Header]]],
             mode: str = 'average', scaling: Optional[str] = None,
             rejection: Optional[str] = None, min_keep: int = 2,
             propagate_mask: bool = True, percentile: float = 50.0,
@@ -296,7 +356,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
     :param scaling: scaling mode: None (default) - do not scale data,
         "average" - scale data to match average values, "percentile" - match
         the given percentile (median for `percentile` = 50), "mode" - match
-        modal values
+        modal values, "equalize" - match image backgrounds for mosaicing
     :param rejection: outlier rejection mode: None (default) - do not reject
         outliers, "chauvenet" - use Chauvenet robust outlier rejection,
         "iraf" - IRAF-like clipping of `lo` lowest and `hi` highest values,
