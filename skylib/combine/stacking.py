@@ -13,9 +13,10 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, full, indices, int32, isnan, logical_or, ma,
-    median, nan, nanpercentile, ndarray, percentile as np_percentile,
-    polyfit, zeros_like)
+    argmax, array, bincount, concatenate, full, indices, int32, isnan,
+    logical_or, ma, median, nan, nanpercentile, ndarray,
+    percentile as np_percentile, zeros, zeros_like)
+from scipy.optimize import leastsq
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -24,6 +25,30 @@ from .smart_stacking import smart_stacking_score
 
 
 __all__ = ['combine']
+
+
+def _get_data(f: Union[pyfits.HDUList,
+                       Tuple[Union[ndarray, ma.MaskedArray], pyfits.Header]],
+              hdu_no: int) -> Union[ndarray, ma.MaskedArray]:
+    """
+    Return data array given input data item (either a FITS file or
+    an array+header); handles masks and NaNs
+
+    :param f: input data item, as passed to :func:`combine` as `input_data`
+    :param hdu_no: optional FITS HDU number if applicable
+
+    :return: data array (masked or unmasked)
+    """
+    if isinstance(f, pyfits.HDUList):
+        data = f[hdu_no].data
+    else:
+        data = f[0]
+    nans = isnan(data)
+    if nans.any():
+        if not isinstance(data, ma.MaskedArray):
+            data = ma.masked_array(data, zeros_like(data, bool))
+        data.mask[nans] = True
+    return data
 
 
 def _do_combine(hdu_no: int, progress: float, progress_step: float,
@@ -46,23 +71,19 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     :return: image stack data and rejection percent
     """
     n = len(input_data)
+    data_shape = ()
 
     # Calculate offsets and scaling factors
-    k_ref, k, offsets = 1, [1]*n, [0]*n
+    k_ref, k, offsets, intersections = 1, [1]*n, [0]*n, {}
     if scaling:
-        handled_files = [0]
         for data_no, f in enumerate(input_data):
-            if isinstance(f, pyfits.HDUList):
-                data = f[hdu_no].data
-            else:
-                data = f[0]
-            nans = isnan(data)
-            if nans.any():
-                if not isinstance(data, ma.MaskedArray):
-                    data = ma.masked_array(data, zeros_like(data, bool))
-                data.mask[nans] = True
+            data = _get_data(f, hdu_no)
+            if not data_shape:
+                data_shape = data.shape
+
             if scaling == 'average':
                 avg = data.mean()
+
             elif scaling == 'percentile':
                 if percentile == 50:
                     avg = median(data) \
@@ -72,6 +93,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     avg = np_percentile(data, percentile) \
                         if not isinstance(data, ma.MaskedArray) \
                         else np_percentile(data.compressed(), percentile)
+
             elif scaling == 'mode':
                 # Compute modal values from histograms; convert to integer
                 # and assume 2 x 16-bit data range
@@ -83,23 +105,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 avg = argmax(bincount(
                     (data - min_val).clip(0, 2*0x10000 - 1)
                     .astype(int32))) + min_val
+
             elif scaling == 'equalize':
                 # Equalize the common image parts; suitable for mosaicing
                 avg = 0
-                for other_data_no, f1 in enumerate(input_data):
-                    if other_data_no == data_no or \
-                            other_data_no in handled_files:
+                # Identify all available intersections with the other images
+                intersections_for_file = {}
+                for other_data_no, other_f in enumerate(input_data):
+                    if other_data_no == data_no:
                         continue
-                    if isinstance(f1, pyfits.HDUList):
-                        other_data = f1[hdu_no].data
-                    else:
-                        other_data = f1[0]
-                    nans = isnan(other_data)
-                    if nans.any():
-                        if not isinstance(other_data, ma.MaskedArray):
-                            other_data = ma.masked_array(
-                                other_data, zeros_like(other_data, bool))
-                        other_data.mask[nans] = True
+                    other_data = _get_data(other_f, hdu_no)
                     if isinstance(data, ma.MaskedArray):
                         if isinstance(other_data, ma.MaskedArray):
                             intersection = (~data.mask) & (~other_data.mask)
@@ -111,32 +126,34 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                         intersection = array(True)
                     if not intersection.any():
                         continue
+
+                    # Found an intersection; save its coordinates and original
+                    # pixel values for both intersecting images
                     if intersection.shape:
-                        data1 = data[intersection]
-                        if isinstance(data, ma.MaskedArray):
-                            data1 = data1.data
-                        data2 = other_data[intersection]
-                        if isinstance(data2, ma.MaskedArray):
-                            data2 = data2.data
+                        inters_y, inters_x = intersection.nonzero()
+                        inters_data1 = data[intersection]
+                        if isinstance(inters_data1, ma.MaskedArray):
+                            inters_data1 = inters_data1.data
+                        inters_data2 = other_data[intersection]
+                        if isinstance(inters_data2, ma.MaskedArray):
+                            inters_data2 = inters_data2.data
                     else:
+                        inters_y, inters_x = indices(data_shape)
                         if isinstance(data, ma.MaskedArray):
-                            data1 = data.data
+                            inters_data1 = data.data
                         else:
-                            data1 = data
+                            inters_data1 = data
                         if isinstance(other_data, ma.MaskedArray):
-                            data2 = other_data.data
+                            inters_data2 = other_data.data
                         else:
-                            data2 = other_data
-                    if len(data1) < 3:
-                        factor, ofs = 1, (data1 - data2).mean()
-                    else:
-                        # noinspection PyTupleAssignmentBalance
-                        factor, ofs = polyfit(data2, data1, 1)
-                    if factor != 0:
-                        k[other_data_no] = k[data_no]/factor
-                        offsets[other_data_no] = \
-                            (ofs + offsets[data_no])/factor
-                        handled_files.append(other_data_no)
+                            inters_data2 = other_data
+                    intersections_for_file[other_data_no] = (
+                        inters_x.ravel(), inters_y.ravel(),
+                        inters_data1 - inters_data2)
+
+                if intersections_for_file:
+                    intersections[data_no] = intersections_for_file
+
             else:
                 raise ValueError(
                     'Unknown scaling mode "{}"'.format(scaling))
@@ -163,6 +180,65 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     if ki != 1:
                         k_ref = ki
                         break
+
+    transformations = {}
+    if scaling == 'equalize' and intersections:
+        # In equalize mode, find the pixel value transformations for each image
+        # that minimize the difference in the areas of intersection
+        param_offset = {}
+        ofs = 0
+        for i in intersections.keys():
+            param_offset[i] = ofs
+            if ofs:
+                ofs += 3
+            else:
+                # First image: no level shift, slope only
+                ofs += 2
+
+        def func(p):
+            """Least-squares objective function"""
+            diffs = []
+            skip = []
+            for i_, file_inters in intersections.items():
+                ofs_ = param_offset[i_]
+                if ofs_:
+                    a1, b1, c1 = p[ofs_:ofs_ + 3]
+                else:
+                    a1 = 0
+                    b1, c1 = p[:2]
+                for j_, (x, y, diff) in file_inters.items():
+                    if (i_, j_) in skip:
+                        continue
+                    ofs_ = param_offset[j_]
+                    if ofs_:
+                        a2, b2, c2 = p[ofs_:ofs_ + 3]
+                    else:
+                        a2 = 0
+                        b2, c2 = p[:2]
+                    a, b, c = a1 - a2, b1 - b2, c1 - c2
+                    if b or c:
+                        if b:
+                            d = b*x
+                            if c:
+                                d += c*y
+                        else:
+                            d = c*y
+                        if a:
+                            d += a
+                        diff = diff + d
+                    elif a:
+                        diff = diff + a
+                    diffs.append(diff)
+                    # Include each given pair only once
+                    skip.append((j_, i_))
+            return concatenate(diffs)
+
+        params = leastsq(func, zeros(3*len(intersections) - 1))[0]
+        for i, ofs in param_offset.items():
+            if ofs:
+                transformations[i] = params[ofs:ofs + 3]
+            else:
+                transformations[i] = concatenate([[0], params[:2]])
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     rowsize = 0
@@ -196,6 +272,19 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data += ofsi
             if ki != k_ref:
                 data *= k_ref/ki
+
+        # Transform pixel values
+        if transformations:
+            chunk_y, chunk_x = indices(datacube[0].shape)
+            chunk_y += chunk
+            for i, (a, b, c) in transformations.items():
+                data = datacube[i]
+                if a:
+                    data += a
+                if b:
+                    data += b*chunk_x
+                if c:
+                    data += c*chunk_y
 
         # Convert NaNs to masked values
         for i, data in enumerate(datacube):
