@@ -13,10 +13,12 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 from numpy import (
-    argmax, array, bincount, concatenate, full, indices, int32, isnan,
-    logical_or, ma, median, nan, nanpercentile, ndarray,
-    percentile as np_percentile, zeros, zeros_like)
-from scipy.optimize import leastsq
+    argmax, array, bincount, empty, full, indices, int32, isnan, logical_or,
+    ma, median, nan, nanpercentile, ndarray, percentile as np_percentile,
+    zeros, zeros_like)
+from numpy.linalg import lstsq
+from scipy.sparse import lil_array
+from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -60,12 +62,12 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 rejection: Optional[str] = None, min_keep: int = 2,
                 propagate_mask: bool = True, percentile: float = 50.0,
                 lo: Optional[float] = None, hi: Optional[float] = None,
-                max_mem_mb: float = 100.0,
+                equalize_order: int = 1, max_mem_mb: float = 100.0,
                 callback: Optional[callable] = None) \
         -> Tuple[Union[ndarray, ma.MaskedArray], float]:
     """
     Combine the given HDUs from all input images; used by :func:`combine` to
-    get a stack of either all input images or, if lucky imaging is enabled,
+    get a stack of either all input images or, if smart stacking is enabled,
     of their subset
 
     :return: image stack data and rejection percent
@@ -149,7 +151,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                             inters_data2 = other_data
                     intersections_for_file[other_data_no] = (
                         inters_x.ravel(), inters_y.ravel(),
-                        inters_data1 - inters_data2)
+                        inters_data2 - inters_data1)
 
                 if intersections_for_file:
                     intersections[data_no] = intersections_for_file
@@ -184,61 +186,94 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     transformations = {}
     if scaling == 'equalize' and intersections:
         # In equalize mode, find the pixel value transformations for each image
-        # that minimize the difference in the areas of intersection
+        # that minimize the difference in the areas of intersection. As long as
+        # the transformations are linear with respect to its parameters, this
+        # is a sparse linear least-squares problem AX = B with MxN coefficient
+        # matrix A, M-vector of observed differences B, and N-vector of
+        # parameters X; N = 3*(number of images that have intersections),
+        # M = (total number of intersecting points) = sum(M_k), where M_k is
+        # the number of points in k-th intersection, k = 1...K, K = (number of
+        # unique intersections).
+        npar = (equalize_order + 1)*(equalize_order + 2)//2
+        n = npar*len(intersections)
+        m = 0
+        skip = []
+        # Count each pair of intersecting images only once
+        for i, intersections_for_file in intersections.items():
+            for j, (_, _, d) in intersections_for_file.items():
+                if (i, j) in skip:
+                    continue
+                m += len(d)
+                skip.append((j, i))
+
+        # Since not all input images may have intersections, the offset of
+        # the triple of parameters (a, b, c) in the N-element vector of
+        # parameters X for i-th image is not simply 3i; build a mapping to
+        # easily calculate this offset
         param_offset = {}
         ofs = 0
         for i in intersections.keys():
             param_offset[i] = ofs
-            if ofs:
-                ofs += 3
-            else:
-                # First image: no level shift, slope only
-                ofs += 2
+            ofs += npar
 
-        def func(p):
-            """Least-squares objective function"""
-            diffs = []
-            skip = []
-            for i_, file_inters in intersections.items():
-                ofs_ = param_offset[i_]
-                if ofs_:
-                    a1, b1, c1 = p[ofs_:ofs_ + 3]
-                else:
-                    a1 = 0
-                    b1, c1 = p[:2]
-                for j_, (x, y, diff) in file_inters.items():
-                    if (i_, j_) in skip:
-                        continue
-                    ofs_ = param_offset[j_]
-                    if ofs_:
-                        a2, b2, c2 = p[ofs_:ofs_ + 3]
-                    else:
-                        a2 = 0
-                        b2, c2 = p[:2]
-                    a, b, c = a1 - a2, b1 - b2, c1 - c2
-                    if b or c:
-                        if b:
-                            d = b*x
-                            if c:
-                                d += c*y
+        # Build the least-squares matrices
+        use_sparse = m*n*8 > max_mem_mb*(1 << 20)
+        if use_sparse:
+            # Too much RAM for a regular array, use scipy.sparse
+            a_lsq = lil_array((m, n), dtype=float)
+        else:
+            a_lsq = zeros((m, n))
+        b_lsq = empty(m, float)
+        skip = []
+        row = 0
+        for i, intersections_for_file in intersections.items():
+            ic = param_offset[i]
+            for j, (x, y, d) in intersections_for_file.items():
+                if (i, j) in skip:
+                    continue
+                jc = param_offset[j]
+                np = len(d)
+
+                # Compute all needed powers of x and y
+                x_pow, y_pow = [1], [1]
+                if equalize_order > 0:
+                    x_pow.append(x)
+                    y_pow.append(y)
+                    for p in range(equalize_order - 1):
+                        x_pow.append(x_pow[-1]*x)
+                        y_pow.append(y_pow[-1]*y)
+
+                # Set i-th column(s) in the following order: 1, x, y, x^2, xy,
+                # y^2, etc., and the same for j, but with the opposite sign
+                pofs = 0
+                for o in range(equalize_order + 1):
+                    for xp in range(o, -1, -1):
+                        yp = o - xp
+                        if xp:
+                            if yp:
+                                col = x_pow[xp]*y_pow[yp]
+                            else:
+                                col = x_pow[xp]
                         else:
-                            d = c*y
-                        if a:
-                            d += a
-                        diff = diff + d
-                    elif a:
-                        diff = diff + a
-                    diffs.append(diff)
-                    # Include each given pair only once
-                    skip.append((j_, i_))
-            return concatenate(diffs)
+                            col = y_pow[yp]
+                        a_lsq[row:row + np, ic + pofs] = col
+                        a_lsq[row:row + np, jc + pofs] = -col
+                        pofs += 1
+                b_lsq[row:row + np] = d
+                row += np
+                # Set coeffs for each pair of intersecting images only once;
+                # setting them twice would overwrite the same coeffs with
+                # the same values but the opposite sign, which will only slow
+                # things down but won't change the result
+                skip.append((j, i))
 
-        params = leastsq(func, zeros(3*len(intersections) - 1))[0]
+        # Compute the least-squares solution
+        if use_sparse:
+            params = sparse_lstsq(a_lsq, b_lsq)[0]
+        else:
+            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
         for i, ofs in param_offset.items():
-            if ofs:
-                transformations[i] = params[ofs:ofs + 3]
-            else:
-                transformations[i] = concatenate([[0], params[:2]])
+            transformations[i] = params[ofs:ofs + npar]
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     rowsize = 0
@@ -273,18 +308,34 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             if ki != k_ref:
                 data *= k_ref/ki
 
-        # Transform pixel values
+        # Equalize backgrounds
         if transformations:
             chunk_y, chunk_x = indices(datacube[0].shape)
             chunk_y += chunk
-            for i, (a, b, c) in transformations.items():
+            x_pow, y_pow = [1], [1]
+            if equalize_order > 0:
+                x_pow.append(chunk_x)
+                y_pow.append(chunk_y)
+                for p in range(equalize_order - 1):
+                    x_pow.append(x_pow[-1]*chunk_x)
+                    y_pow.append(y_pow[-1]*chunk_y)
+            for i, coeffs in transformations.items():
                 data = datacube[i]
-                if a:
-                    data += a
-                if b:
-                    data += b*chunk_x
-                if c:
-                    data += c*chunk_y
+                pofs = 0
+                for o in range(equalize_order + 1):
+                    for xp in range(o, -1, -1):
+                        c = coeffs[pofs]
+                        if c:
+                            yp = o - xp
+                            if xp:
+                                if yp:
+                                    d = x_pow[xp]*y_pow[yp]
+                                else:
+                                    d = x_pow[xp]
+                            else:
+                                d = y_pow[yp]
+                            data += c*d
+                        pofs += 1
 
         # Convert NaNs to masked values
         for i, data in enumerate(datacube):
@@ -420,6 +471,52 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     if isinstance(res, ma.MaskedArray) and (
             res.mask is None or res.mask is False or not res.mask.any()):
         res = res.data
+
+    if transformations and equalize_order > 0:
+        # The background equalization least-squares system is degenerate
+        # (the coefficient matrix rank is npar less than N (see above), so
+        # in fact we have a family of least-squares solutions; choose one of
+        # them that makes the resulting mosaic background as flat as possible
+        # by fitting the model in the entire mosaic
+        equalize_order = 1
+        npar = (equalize_order + 1)*(equalize_order + 2)//2
+        y, x = indices(data_shape)
+        x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
+        x_pow, y_pow = [1, x], [1, y]
+        for p in range(equalize_order - 1):
+            x_pow.append(x_pow[-1]*x)
+            y_pow.append(y_pow[-1]*y)
+        a_lsq = empty((len(x), npar))
+        pofs = 0
+        for o in range(equalize_order + 1):
+            for xp in range(o, -1, -1):
+                yp = o - xp
+                if xp:
+                    if yp:
+                        col = x_pow[xp]*y_pow[yp]
+                    else:
+                        col = x_pow[xp]
+                else:
+                    col = y_pow[yp]
+                a_lsq[:, pofs] = col
+                pofs += 1
+        params = lstsq(a_lsq, b_lsq, rcond=None)[0]
+        pofs = 0
+        for o in range(equalize_order + 1):
+            for xp in range(o, -1, -1):
+                c = params[pofs]
+                if c:
+                    yp = o - xp
+                    if xp:
+                        if yp:
+                            col = x_pow[xp]*y_pow[yp]
+                        else:
+                            col = x_pow[xp]
+                    else:
+                        col = y_pow[yp]
+                    b_lsq -= c*col
+                pofs += 1
+
     return res, rej_percent
 
 
@@ -430,8 +527,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             rejection: Optional[str] = None, min_keep: int = 2,
             propagate_mask: bool = True, percentile: float = 50.0,
             lo: Optional[float] = None, hi: Optional[float] = None,
-            smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
-            callback: Optional[callable] = None) \
+            equalize_order: int = 1, smart_stacking: Optional[str] = None,
+            max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
         -> List[Tuple[ndarray, pyfits.Header]]:
     """
     Combine a series of FITS images using the various stacking modes with
@@ -469,6 +566,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             default: not set
         `rejection` = "sigclip": reject values more than `hi` sigmas above the
             baseline; default: 3
+    :param equalize_order: background equalization polynomial order; used with
+        `scaling` = "equalize"
     :param smart_stacking: enable smart stacking: automatically exclude those
         images from the stack that will not improve its quality in a certain
         sense; currently supported modes:
@@ -541,7 +640,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
         res, rej_percent = _do_combine(
             hdu_no, total_progress, progress_step, data_width, data_height,
             input_data, mode, scaling, rejection, min_keep, propagate_mask,
-            percentile, lo, hi, max_mem_mb, callback)
+            percentile, lo, hi, equalize_order, max_mem_mb, callback)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -562,7 +661,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 new_res, new_rej_percent = _do_combine(
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
-                    propagate_mask, percentile, lo, hi, max_mem_mb, callback)
+                    propagate_mask, percentile, lo, hi, equalize_order,
+                    max_mem_mb, callback)
                 total_progress += progress_step
                 new_score = score_func(new_res)
                 if new_score > score:
