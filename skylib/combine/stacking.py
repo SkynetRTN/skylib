@@ -705,7 +705,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
 
         try:
             hdr['DATE-OBS'] = (
-                min([t for t in t_start if t is not None]),
+                min([t for t in t_start if t is not None]).isoformat(),
                 'Start time of the first exposure in stack')
         except ValueError:
             # No exposure start times
@@ -736,7 +736,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
 
         try:
             hdr['DATE-END'] = (
-                max([t for t in t_end if t is not None]),
+                max([t for t in t_end if t is not None]).isoformat(),
                 'Stop time of the last exposure in stack')
         except ValueError:
             # No exposure stop times
