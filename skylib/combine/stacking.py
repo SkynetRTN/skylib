@@ -700,6 +700,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             hdr['EXPTIME'] = hdr['EXPOSURE'] = (
                 float(exp_lengths.sum() if mode == 'sum'
                       else exp_lengths.mean()), '[s] Effective exposure time')
+            hdr['SUMEXP'] = (
+                float(exp_lengths.sum()), '[s] Sum of all exposures times')
 
         try:
             hdr['DATE-OBS'] = (
