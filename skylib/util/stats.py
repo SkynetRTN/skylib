@@ -75,7 +75,10 @@ def chauvenet(data: ndarray, min_vals: int = 10,
             diff = clip(data - m, 0, None)
 
         if sigma is None:
-            absdev = vstack([[zeros(diff.shape[1])], diff])
+            if diff.ndim == 1:
+                absdev = r_[0, diff]
+            else:
+                absdev = vstack([[zeros(diff.shape[1:])], diff])
             ndarray.sort(absdev, 0)
             i = (0.683*n).astype(int)
             k = 0.683*(n - 1) % 1
@@ -84,7 +87,10 @@ def chauvenet(data: ndarray, min_vals: int = 10,
             s = (absdev[idx] + (absdev[idx1] - absdev[idx])*k)*(1 + 1.7/n)
             if (s <= 0).any():
                 # Fall back to normal definition
-                s[s <= 0] = sqrt(((data - m)**2).sum(0)/(n - 1))[s <= 0]
+                if s.ndim:
+                    s[s <= 0] = sqrt(((data - m)**2).sum(0)/(n - 1))[s <= 0]
+                else:
+                    s = sqrt(((data - m)**2).sum()/(n - 1))
         else:
             s = sigma
         if s.ndim:
