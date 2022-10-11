@@ -99,7 +99,7 @@ def chauvenet(data: ndarray, min_vals: int = 10,
         elif s <= 0:
             break
 
-        bad = erf(diff/(s*sqrt(2))) > 1 - 0.5/n
+        bad = (erf(diff/(s*sqrt(2))) > 1 - 0.5/n) & (n > min_vals)
         n_bad = bad.sum(0)
         if not n_bad.any() or (n - n_bad < min_vals).all():
             break
