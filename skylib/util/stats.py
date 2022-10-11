@@ -6,7 +6,8 @@ Statistics-related functions
 
 from typing import Optional, Union
 
-from numpy import array, clip, inf, ma, ndarray, r_, sqrt, zeros
+from numpy import (
+    array, clip, indices, inf, ma, ndarray, r_, sqrt, vstack, zeros)
 from scipy.special import erf
 
 
@@ -26,8 +27,11 @@ def chauvenet(data: ndarray, min_vals: int = 10,
         :class:`numpy.ma.MaskedArray` with some values already rejected;
         for multidimensional data, rejection is done along the 0th axis
     :param min_vals: minimum number of non-masked values to keep
-    :param mean: optional mean value override
-    :param sigma: optional standard deviation override
+    :param mean: optional mean value override; defaults to median of non-masked
+        data at each iteration
+    :param sigma: optional standard deviation override; defaults to
+        the estimate given by the super-simplified version of Robust Chauvenet
+        Rejection (Maples et al.)
     :param clip_lo: reject negative outliers
     :param clip_hi: reject positive outliers
 
@@ -57,19 +61,9 @@ def chauvenet(data: ndarray, min_vals: int = 10,
             break
 
         if mean is None:
-            m = data.mean(0)
+            m = ma.median(data, 0)
         else:
             m = mean
-
-        if sigma is None:
-            s = sqrt(((data - m)**2).sum(0)/(n - 1))
-        else:
-            s = sigma
-        if s.ndim:
-            # Keep zero-sigma (= constant across the axis) elements intact
-            s[(s <= 0).nonzero()] = inf
-        elif s <= 0:
-            break
 
         if clip_lo and clip_hi:
             diff = abs(data - m)
@@ -79,7 +73,27 @@ def chauvenet(data: ndarray, min_vals: int = 10,
         else:
             # noinspection PyTypeChecker
             diff = clip(data - m, 0, None)
-        bad = erf(diff/(s*sqrt(2))) > 1 - 1/(2*n)
+
+        if sigma is None:
+            absdev = vstack([[zeros(diff.shape[1])], diff])
+            ndarray.sort(absdev, 0)
+            i = (0.683*n).astype(int)
+            k = 0.683*(n - 1) % 1
+            idx = (i,) + tuple(indices(absdev.shape[1:]))
+            idx1 = (i + 1,) + tuple(indices(absdev.shape[1:]))
+            s = (absdev[idx] + (absdev[idx1] - absdev[idx])*k)*(1 + 1.7/n)
+            if (s <= 0).any():
+                # Fall back to normal definition
+                s[s <= 0] = sqrt(((data - m)**2).sum(0)/(n - 1))[s <= 0]
+        else:
+            s = sigma
+        if s.ndim:
+            # Keep zero-sigma (= constant across the axis) elements intact
+            s[(s <= 0).nonzero()] = inf
+        elif s <= 0:
+            break
+
+        bad = erf(diff/(s*sqrt(2))) > 1 - 0.5/n
         n_bad = bad.sum(0)
         if not n_bad.any() or (n - n_bad < min_vals).all():
             break
