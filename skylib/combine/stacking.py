@@ -367,8 +367,20 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         else:
             datacube = array(datacube)
 
-        if rejection == 'chauvenet':
-            datacube.mask = chauvenet(datacube, min_vals=min_keep)
+        if rejection in ('chauvenet', 'rcr'):
+            if lo is None:
+                lo = True
+            if hi is None:
+                hi = True
+            if rejection == 'rcr':
+                mean_type = 'median'
+                sigma_type = 'absdev68'
+            else:
+                mean_type = 'mean'
+                sigma_type = 'stddev'
+            datacube.mask = chauvenet(
+                datacube,  min_vals=min_keep, mean=mean_type, sigma=sigma_type,
+                clip_lo=lo, clip_hi=hi)
         elif rejection == 'iraf':
             if lo is None:
                 lo = 1
@@ -526,7 +538,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             mode: str = 'average', scaling: Optional[str] = None,
             rejection: Optional[str] = None, min_keep: int = 2,
             propagate_mask: bool = True, percentile: float = 50.0,
-            lo: Optional[float] = None, hi: Optional[float] = None,
+            lo: Optional[Union[bool, int, float]] = None,
+            hi: Optional[Union[bool, int, float]] = None,
             equalize_order: int = 1, smart_stacking: Optional[str] = None,
             max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
         -> List[Tuple[ndarray, pyfits.Header]]:
@@ -544,28 +557,34 @@ def combine(input_data: List[Union[pyfits.HDUList,
         the given percentile (median for `percentile` = 50), "mode" - match
         modal values, "equalize" - match image backgrounds for mosaicing
     :param rejection: outlier rejection mode: None (default) - do not reject
-        outliers, "chauvenet" - use Chauvenet robust outlier rejection,
-        "iraf" - IRAF-like clipping of `lo` lowest and `hi` highest values,
-        "minmax" - reject values outside the absolute lower and upper limits
-        (use with caution as `min_keep` below is not guaranteed, and you may
-        end up in all values rejected for some or even all pixels), "sigclip" -
-        iteratively reject pixels below and/or above the baseline
+        outliers, "chauvenet" - use classic Chauvenet rejection, "rcr" - use
+        super-simplified Robust Chauvenet Rejection, "iraf" - IRAF-like
+        clipping of `lo` lowest and `hi` highest values, "minmax" - reject
+        values outside the absolute lower and upper limits (use with caution as
+        `min_keep` below is not guaranteed, and you may end up in all values
+        rejected for some or even all pixels), "sigclip" - iteratively reject
+        pixels below and/or above the baseline
     :param min_keep: minimum values to keep during rejection
     :param propagate_mask: when combining masked images, mask the output pixel
         if it's masked in at least one input image
     :param percentile: for `mode`="percentile", default: 50 (median)
     :param lo:
-        `rejection` = "iraf": number of lowest values to clip; default: 1
-        `rejection` = "minmax": reject values below this limit;
+        `rejection` = "iraf": (int) number of lowest values to clip; default: 1
+        `rejection` = "minmax": (float) reject values below this limit;
             default: not set
-        `rejection` = "sigclip": reject values more than `lo` sigmas below the
-            baseline; default: 3
+        `rejection` = "sigclip": (float) reject values more than `lo` sigmas
+            below the baseline; default: 3
+        `rejection` = "chauvenet" or "rcr": (bool) reject negative outliers;
+            default: True
     :param hi:
-        `rejection` = "iraf": number of highest values to clip; default: 1;
-        `rejection` = "minmax": reject values above this limit;
+        `rejection` = "iraf": (int) number of highest values to clip;
+            default: 1;
+        `rejection` = "minmax": (float) reject values above this limit;
             default: not set
-        `rejection` = "sigclip": reject values more than `hi` sigmas above the
-            baseline; default: 3
+        `rejection` = "sigclip": (float) reject values more than `hi` sigmas
+            above the baseline; default: 3
+        `rejection` = "chauvenet" or "rcr": (bool) reject positive outliers;
+            default: True
     :param equalize_order: background equalization polynomial order; used with
         `scaling` = "equalize"
     :param smart_stacking: enable smart stacking: automatically exclude those
