@@ -7,7 +7,8 @@ Statistics-related functions
 from typing import Optional, Union
 
 from numpy import (
-    array, clip, indices, inf, ma, ndarray, r_, sqrt, vstack, zeros)
+    array, clip, inf, isnan, ma, nan, nanquantile, ndarray, ones_like, r_,
+    sqrt, zeros)
 from scipy.special import erf
 
 
@@ -15,25 +16,28 @@ __all__ = ['chauvenet', 'weighted_median', 'weighted_quantile']
 
 
 def chauvenet(data: ndarray, min_vals: int = 10,
-              mean: Optional[Union[ndarray, float, int]] = None,
-              sigma: Optional[Union[ndarray, float, int]] = None,
-              clip_lo: bool = True, clip_hi: bool = True) -> ndarray:
+              mean: Union[str, ndarray, float, int] = 'mean',
+              sigma: Union[str, ndarray, float, int] = 'stddev',
+              clip_lo: bool = True, clip_hi: bool = True,
+              max_iter: int = 0) -> ndarray:
     """
-    Reject outliers using Chauvenet's algorithm
+    Reject outliers using Chauvenet's algorithm or its modification
 
     https://en.wikipedia.org/wiki/Chauvenet%27s_criterion
+
+    Regular Chauvenet corresponds to `mean`="mean", `sigma`="stddev" (default).
+    `mean`="median", `sigma`="absdev68" is the simplified version of unweighted
+        Robust Chauvenet Rejection (RCR, see Maples et al.).
 
     :param data: input array or object that can be converted to an array, incl.
         :class:`numpy.ma.MaskedArray` with some values already rejected;
         for multidimensional data, rejection is done along the 0th axis
     :param min_vals: minimum number of non-masked values to keep
-    :param mean: optional mean value override; defaults to median of non-masked
-        data at each iteration
-    :param sigma: optional standard deviation override; defaults to
-        the estimate given by the super-simplified version of Robust Chauvenet
-        Rejection (Maples et al.)
+    :param mean: mean value type ("mean" or "median") or override
+    :param sigma: standard deviation type ("stddev" or "absdev68") or override
     :param clip_lo: reject negative outliers
     :param clip_hi: reject positive outliers
+    :param max_iter: maximum number of rejection iterations; default: no limit
 
     :return: boolean mask array with 1's corresponding to rejected elements;
         same shape as input data
@@ -55,13 +59,17 @@ def chauvenet(data: ndarray, min_vals: int = 10,
     if not data.mask.shape:
         data.mask = zeros(data.shape, bool)
 
-    while True:
+    n_iter = 0
+    while not max_iter or n_iter < max_iter:
         n = n_tot - data.mask.sum(0)
         if (n <= min_vals).all():
             break
 
-        if mean is None:
-            m = ma.median(data, 0)
+        if isinstance(mean, str):
+            if mean == 'mean':
+                m = ma.mean(data, 0)
+            else:
+                m = ma.median(data, 0)
         else:
             m = mean
 
@@ -74,23 +82,43 @@ def chauvenet(data: ndarray, min_vals: int = 10,
             # noinspection PyTypeChecker
             diff = clip(data - m, 0, None)
 
-        if sigma is None:
-            if diff.ndim == 1:
-                absdev = r_[0, diff]
+        if isinstance(sigma, str):
+            if sigma == 'stddev':
+                # Classic Chauvenet
+                s = sqrt((diff**2).sum(0)/(n - 1))
             else:
-                absdev = vstack([[zeros(diff.shape[1:])], diff])
-            ndarray.sort(absdev, 0)
-            i = (0.683*n).astype(int)
-            k = 0.683*(n - 1) % 1
-            idx = (i,) + tuple(indices(absdev.shape[1:]))
-            idx1 = (i + 1,) + tuple(indices(absdev.shape[1:]))
-            s = (absdev[idx] + (absdev[idx1] - absdev[idx])*k)*(1 + 1.7/n)
-            if (s <= 0).any():
-                # Fall back to normal definition
+                s = nanquantile(diff.filled(nan), 0.683, axis=0)
                 if s.ndim:
-                    s[s <= 0] = sqrt(((data - m)**2).sum(0)/(n - 1))[s <= 0]
+                    s[isnan(s)] = 0
+                elif isnan(s):
+                    s = array(0.0)
+
+                # Apply empirical RCR correction factor
+                if s.ndim:
+                    cf = ones_like(s)
+                    cf[n == 2] += 0.76
+                    cf[n == 3] += 0.59
+                    cf[n == 4] += 0.53
+                    cf[n == 5] += 0.31
+                    cf[n > 5] += (2.2212*n**-1.137)[n > 5]
+                elif n == 2:
+                    cf = 1.76
+                elif n == 3:
+                    cf = 1.59
+                elif n == 4:
+                    cf = 1.53
+                elif n == 5:
+                    cf = 1.31
                 else:
-                    s = sqrt(((data - m)**2).sum()/(n - 1))
+                    cf = 1 + 2.2212*n**-1.137
+                s *= cf
+
+                if (s <= 0).any():
+                    # Fall back to normal definition
+                    if s.ndim:
+                        s[s <= 0] = sqrt((diff**2).sum(0)/(n - 1))[s <= 0]
+                    else:
+                        s = sqrt((diff**2).sum()/(n - 1))
         else:
             s = sigma
         if s.ndim:
@@ -105,6 +133,8 @@ def chauvenet(data: ndarray, min_vals: int = 10,
             break
 
         data.mask[bad.nonzero()] = True
+
+        n_iter += 1
 
     return data.mask
 
