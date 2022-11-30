@@ -7,6 +7,6 @@ numba==0.56.0
 numpy == 1.22.2
 opencv-contrib-python == 4.6.0.66
 photutils == 1.5.0
-Pillow == 9.0.1
+Pillow == 9.3.0
 scipy == 1.8.0
 sep == 1.0.3
