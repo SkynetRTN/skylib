@@ -16,8 +16,8 @@ def radio_nat(img_r, img_g, img_b, fcal_r, fcal_g, fcal_b, ftrue_r, ftrue_g,
     img_b = img_b.astype(float)
 
     # Transform G first
-    img_g *= fcal_g/ftrue_g
     fg = img_g + floor
+    img_g *= fcal_g/ftrue_g
 
     # Transform R and B
     for img, fcal, ftrue, nu, lam in [
@@ -33,11 +33,11 @@ def radio_nat(img_r, img_g, img_b, fcal_r, fcal_g, fcal_b, ftrue_r, ftrue_g,
         # so they aren't just white
         a = (np.log(fg/img)/log_nu).clip(-betamax, betamax)
 
-        # Handle NaNs at fg = img = 0
+        # Handle NaNs at fg = img = 0 and fg/img < 0
         a[np.isnan(a).nonzero()] = 0
 
         good = ((img > 0) & (fg > 0)).nonzero()
-        img[good] = (fg*(lam/lambda_g)**a)[good]
+        img[good] = (fg*(lambda_g/lam)**a)[good]
         img -= floor
 
     return img_r, img_g, img_b
