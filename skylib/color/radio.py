@@ -34,9 +34,9 @@ def radio_nat(img_r, img_g, img_b, fcal_r, fcal_g, fcal_b, ftrue_r, ftrue_g,
         a = (np.log(fg/img)/log_nu).clip(-betamax, betamax)
 
         # Handle NaNs at fg = img = 0
-        a[np.isnan(a)] = 0
+        a[np.isnan(a).nonzero()] = 0
 
-        img[(img > 0) & (fg > 0)] = fg*(lam/lambda_g)**a
+        img[((img > 0) & (fg > 0)).nonzero()] = fg*(lam/lambda_g)**a
         img -= floor
 
     return img_r, img_g, img_b
