@@ -7,15 +7,15 @@ Statistics-related functions
 from typing import Optional, Union
 
 from numpy import (
-    array, clip, inf, isnan, ma, nan, nanquantile, ndarray, ones_like, r_,
-    sqrt, zeros)
+    arctan, array, clip, inf, isnan, ma, nan, nanquantile, ndarray, ones_like,
+    pi, r_, sqrt, zeros)
 from scipy.special import erf
 
 
 __all__ = ['chauvenet', 'weighted_median', 'weighted_quantile']
 
 
-def chauvenet(data: ndarray, min_vals: int = 10,
+def chauvenet(data: ndarray, nu: int = 0, min_vals: int = 10,
               mean: Union[str, ndarray, float, int] = 'mean',
               sigma: Union[str, ndarray, float, int] = 'stddev',
               clip_lo: bool = True, clip_hi: bool = True,
@@ -32,6 +32,10 @@ def chauvenet(data: ndarray, min_vals: int = 10,
     :param data: input array or object that can be converted to an array, incl.
         :class:`numpy.ma.MaskedArray` with some values already rejected;
         for multidimensional data, rejection is done along the 0th axis
+    :param nu: number of degrees of freedom in Student's distribution; `nu` = 0
+        means infinity = Gaussian distribution, nu = 1 => Lorentzian
+        distribution; also, `nu` = 2 and 4 are supported; for other values,
+        CDF is not analytically invertible
     :param min_vals: minimum number of non-masked values to keep
     :param mean: mean value type ("mean" or "median") or override
     :param sigma: standard deviation type ("stddev" or "absdev68") or override
@@ -43,9 +47,9 @@ def chauvenet(data: ndarray, min_vals: int = 10,
         same shape as input data
 
     >>> import numpy
-    >>> d = numpy.zeros([5, 10])
-    >>> d[2, 3] = d[4, 5] = 1
-    >>> chauvenet(d, min_vals=4).nonzero()
+    >>> x = numpy.zeros([5, 10])
+    >>> x[2, 3] = x[4, 5] = 1
+    >>> chauvenet(x, min_vals=4).nonzero()
     (array([2, 4]), array([3, 5]))
     """
     data = ma.masked_array(data)
@@ -85,17 +89,17 @@ def chauvenet(data: ndarray, min_vals: int = 10,
         if isinstance(sigma, str):
             if sigma == 'stddev':
                 # Classic Chauvenet
-                s = sqrt((diff**2).sum(0)/(n - 1))
+                gamma = sqrt((diff**2).sum(0)/(n - 1))
             else:
-                s = nanquantile(diff.filled(nan), 0.683, axis=0)
-                if s.ndim:
-                    s[isnan(s)] = 0
-                elif isnan(s):
-                    s = array(0.0)
+                gamma = nanquantile(diff.filled(nan), 0.683, axis=0)
+                if gamma.ndim:
+                    gamma[isnan(gamma)] = 0
+                elif isnan(gamma):
+                    gamma = array(0.0)
 
                 # Apply empirical RCR correction factor
-                if s.ndim:
-                    cf = ones_like(s)
+                if gamma.ndim:
+                    cf = ones_like(gamma)
                     cf[n == 2] += 0.76
                     cf[n == 3] += 0.59
                     cf[n == 4] += 0.53
@@ -111,23 +115,34 @@ def chauvenet(data: ndarray, min_vals: int = 10,
                     cf = 1.31
                 else:
                     cf = 1 + 2.2212*n**-1.137
-                s *= cf
+                gamma *= cf
 
-                if (s <= 0).any():
+                if (gamma <= 0).any():
                     # Fall back to normal definition
-                    if s.ndim:
-                        s[s <= 0] = sqrt((diff**2).sum(0)/(n - 1))[s <= 0]
+                    if gamma.ndim:
+                        gamma[gamma <= 0] = sqrt((diff**2).sum(0)/(n - 1))[
+                            gamma <= 0]
                     else:
-                        s = sqrt((diff**2).sum()/(n - 1))
+                        gamma = sqrt((diff**2).sum()/(n - 1))
         else:
-            s = sigma
-        if s.ndim:
+            gamma = sigma
+        if gamma.ndim:
             # Keep zero-sigma (= constant across the axis) elements intact
-            s[(s <= 0).nonzero()] = inf
-        elif s <= 0:
+            gamma[(gamma <= 0).nonzero()] = inf
+        elif gamma <= 0:
             break
 
-        bad = (erf(diff/(s*sqrt(2))) > 1 - 0.5/n) & (n > min_vals)
+        t = diff/gamma
+        if nu == 1:  # Lorentzian
+            cdf = 0.5 + arctan(t)/pi
+        elif nu == 2:
+            cdf = 0.5 + 0.5/sqrt(2)*t/sqrt(1 + 0.5*t**2)
+        elif nu == 4:
+            d = t**2/(1 + 0.25*t**2)
+            cdf = 0.5 + 3/8*sqrt(d)*(1 - 1/12*d)
+        else:  # Gaussian
+            cdf = 0.5*(1 + erf(t/sqrt(2)))
+        bad = (cdf > 1 - 0.25/n) & (n > min_vals)
         n_bad = bad.sum(0)
         if not n_bad.any() or (n - n_bad < min_vals).all():
             break
