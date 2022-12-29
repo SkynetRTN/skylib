@@ -45,6 +45,8 @@ def _get_data(f: Union[pyfits.HDUList,
         data = f[hdu_no].data
     else:
         data = f[0]
+    if data.dtype.kind != 'f':
+        data = data.astype(float)
     nans = isnan(data)
     if nans.any():
         if not isinstance(data, ma.MaskedArray):
