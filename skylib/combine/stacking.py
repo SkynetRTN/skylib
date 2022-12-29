@@ -298,8 +298,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     rej_percent = 0
     for chunk in range(0, data_height, chunksize):
         datacube = [
-            f[hdu_no].data[chunk:chunk + chunksize]
-            if isinstance(f, pyfits.HDUList) else f[0][chunk:chunk + chunksize]
+            _get_data(f, hdu_no).data[chunk:chunk + chunksize]
             for f in input_data
         ]
 
