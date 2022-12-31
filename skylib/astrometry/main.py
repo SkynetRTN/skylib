@@ -13,8 +13,10 @@ import os
 import sys
 from glob import glob
 import ctypes
+
 import numpy
 from astropy.wcs import Sip, WCS
+
 from . import an_engine
 
 
@@ -290,28 +292,33 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
             wcs_ctype = ('RA---TAN', 'DEC--TAN')
             if enable_sip:
                 sip = best_match.sip
-                wcstan = sip.wcstan
-
-                a_order, b_order = sip.a_order, sip.b_order
-                if a_order > 0 or b_order > 0:
-                    ap_order, bp_order = sip.ap_order, sip.bp_order
-                    maxorder = an_engine.SIP_MAXORDER
-                    a = array_from_swig(
-                        sip.a, (maxorder, maxorder)
-                    )[:a_order + 1, :a_order + 1]
-                    b = array_from_swig(
-                        sip.b, (maxorder, maxorder)
-                    )[:b_order + 1, :b_order + 1]
-                    if a.any() or b.any():
-                        ap = array_from_swig(
-                            sip.ap, (maxorder, maxorder)
-                        )[:ap_order + 1, :ap_order + 1]
-                        bp = array_from_swig(
-                            sip.bp, (maxorder, maxorder)
-                        )[:bp_order + 1, :bp_order + 1]
-                        sol.wcs.sip = Sip(
-                            a, b, ap, bp, array_from_swig(wcstan.crpix, (2,)))
-                        wcs_ctype = ('RA---TAN-SIP', 'DEC--TAN-SIP')
+                try:
+                    wcstan = sip.wcstan
+                except AttributeError:
+                    # Unable to compute SIP distortions, too few sources?
+                    wcstan = best_match.wcstan
+                else:
+                    a_order, b_order = sip.a_order, sip.b_order
+                    if a_order > 0 or b_order > 0:
+                        ap_order, bp_order = sip.ap_order, sip.bp_order
+                        maxorder = an_engine.SIP_MAXORDER
+                        a = array_from_swig(
+                            sip.a, (maxorder, maxorder)
+                        )[:a_order + 1, :a_order + 1]
+                        b = array_from_swig(
+                            sip.b, (maxorder, maxorder)
+                        )[:b_order + 1, :b_order + 1]
+                        if a.any() or b.any():
+                            ap = array_from_swig(
+                                sip.ap, (maxorder, maxorder)
+                            )[:ap_order + 1, :ap_order + 1]
+                            bp = array_from_swig(
+                                sip.bp, (maxorder, maxorder)
+                            )[:bp_order + 1, :bp_order + 1]
+                            sol.wcs.sip = Sip(
+                                a, b, ap, bp,
+                                array_from_swig(wcstan.crpix, (2,)))
+                            wcs_ctype = ('RA---TAN-SIP', 'DEC--TAN-SIP')
             else:
                 wcstan = best_match.wcstan
             sol.wcs.wcs.ctype = wcs_ctype
