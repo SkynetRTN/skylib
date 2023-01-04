@@ -491,7 +491,6 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # in fact we have a family of least-squares solutions; choose one of
         # them that makes the resulting mosaic background as flat as possible
         # by fitting the model in the entire mosaic
-        equalize_order = 1
         npar = (equalize_order + 1)*(equalize_order + 2)//2
         y, x = indices(data_shape)
         x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
