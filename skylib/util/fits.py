@@ -4,12 +4,17 @@ Getting standard info from FITS headers
 :func:`~get_fits_time(): get exposure start/center/stop time from FITS header
 """
 
-from __future__ import absolute_import, division, print_function
-
 from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
+from numpy import hypot
+from astropy.io.fits import Header
+from astropy.wcs import WCS
 
 
-__all__ = ['get_fits_time', 'str_to_datetime']
+__all__ = [
+    'str_to_datetime', 'get_fits_time', 'get_fits_exp_length', 'get_fits_gain',
+]
 
 
 def str_to_datetime(s):
@@ -33,33 +38,37 @@ def str_to_datetime(s):
     return t
 
 
-def get_fits_time(hdr, exp_length=None):
+def get_fits_time(hdr: Header, exp_length: Optional[float] = None) \
+        -> Tuple[Optional[datetime], Optional[datetime], Optional[datetime]]:
     """
     Get exposure start, center, and stop times from FITS header
 
-    :param :class:`astropy.io.fits.Header` hdr: FITS header
-    :param float exp_length: optional exposure length in seconds, e.g. from
+    :param hdr: FITS header
+    :param exp_length: optional exposure length in seconds, e.g. from
         the database
 
     :return: exposure start, center, and stop times as datetime instances, None
         if unknown
-    :rtype: tuple(3)[:class:`datetime.datetime` | None]
     """
     t_start = t_cen = t_stop = None
 
     try:
-        t_start = str_to_datetime(hdr['DATE-OBS'])
-    except KeyError:
+        t_start = hdr['DATE-OBS']
+        if 'T' not in t_start:
+            t_start += 'T' + hdr['TIME-OBS']
+    except (KeyError, ValueError):
         pass
+    else:
+        t_start = str_to_datetime(t_start)
 
     try:
         t_cen = str_to_datetime(hdr['DATE-CEN'])
-    except KeyError:
+    except (KeyError, ValueError):
         pass
 
     try:
         t_stop = str_to_datetime(hdr['DATE-END'])
-    except KeyError:
+    except (KeyError, ValueError):
         pass
 
     if None in (t_start, t_cen, t_stop):
@@ -93,3 +102,97 @@ def get_fits_time(hdr, exp_length=None):
                 t_stop = t_start + timedelta(seconds=texp)
 
     return t_start, t_cen, t_stop
+
+
+def get_fits_exp_length(hdr: Header) -> Optional[float]:
+    """
+    Get exposure length from FITS header
+
+    :param hdr: FITS file header
+
+    :return: exposure length in seconds; None if unknown
+    """
+    texp = None
+    for name in ('EXPOSURE', 'EXPTIME'):
+        try:
+            texp = float(hdr[name])
+        except (KeyError, ValueError):
+            continue
+        else:
+            break
+    return texp
+
+
+def get_fits_gain(hdr: Header) -> float:
+    """
+    Get effective gain from FITS header
+
+    :param hdr: FITS file header
+
+    :return: effective gain in e-/ADU; None if unknown
+    """
+    gain = None
+    for name in ('GAIN', 'EGAIN', 'EPERADU'):
+        try:
+            gain = float(hdr[name])
+        except (KeyError, ValueError):
+            continue
+        else:
+            break
+    return gain
+
+
+def get_fits_fov(hdr: Header) \
+        -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """
+    Get FOV RA/Dec and radius from FITS header
+
+    :param hdr: FITS file header
+
+    :return: FOV center RA (hours), Dec (degrees), and radius (degrees); None
+        if unknown
+    """
+    width, height = hdr.get('NAXIS1'), hdr.get('NAXIS2')
+    ra0 = dec0 = radius = None
+    # noinspection PyBroadException
+    try:
+        wcs = WCS(hdr, relax=True)
+        if not wcs.has_celestial:
+            raise Exception()
+    except Exception:
+        # No valid WCS in the header; try using MaxIm fields
+        for name in ('OBJRA', 'TELRA', 'RA'):
+            try:
+                h, m, s = hdr[name].split(':')
+                ra0 = int(h) + int(m)/60 + float(s.replace(',', '.'))/3600
+            except (KeyError, ValueError):
+                pass
+            else:
+                break
+        for name in ('OBJDEC', 'TELDEC', 'DEC'):
+            try:
+                d, m, s = hdr[name].split(':')
+                dec0 = (abs(int(d)) + int(m)/60 +
+                        float(s.replace(',', '.'))/3600) * \
+                       (1 - d.strip().startswith('-'))
+            except (KeyError, ValueError):
+                pass
+            else:
+                break
+        scale = hdr.get('SECPIX')
+    else:
+        if width and height:
+            ra0, dec0 = wcs.all_pix2world(
+                (hdr['NAXIS1'] - 1)/2, (hdr['NAXIS2'] - 1)/2, 0)
+            ra0 = ra0.to('hourangle').value
+            dec0 = dec0.to('deg').value
+        else:
+            ra0, dec0 = wcs.wcs.crval
+            ra0 /= 15
+        scales = wcs.proj_plane_pixel_scales()
+        scale = (scales[0].to('arcsec').value + scales[1].to('arcsec').value)/2
+
+    if scale is not None and width and height:
+        radius = hypot(width, height)/2*scale/3600
+
+    return ra0, dec0, radius
