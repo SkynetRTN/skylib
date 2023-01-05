@@ -11,6 +11,7 @@ from datetime import timedelta
 import os.path
 import logging
 from typing import List, Optional, Tuple, Union
+import gc
 
 from numpy import (
     argmax, array, bincount, empty, full, indices, int32, isnan, logical_or,
@@ -228,6 +229,11 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         b_lsq = empty(m, float)
         skip = []
         row = 0
+
+        def getram():  # Current process resident RAM usage in Megabytes
+            with open('/proc/self/statm') as f:
+                return int(f.read().split()[1])*4096/(1<<20)
+
         for i, intersections_for_file in intersections.items():
             ic = param_offset[i]
             for j, (x, y, d) in intersections_for_file.items():
@@ -261,6 +267,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                         a_lsq[row:row + np, ic + pofs] = col
                         a_lsq[row:row + np, jc + pofs] = -col
                         pofs += 1
+
+                        del col
+                        gc.collect()
+                print(f'RAM ({i} {j}) {getram():.1f}')
+
+                # Explicitly deallocate temporary arrays to avoid memory leaks
+                del x_pow, y_pow
+                gc.collect()
+
                 b_lsq[row:row + np] = d
                 row += np
                 # Set coeffs for each pair of intersecting images only once;
@@ -337,6 +352,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                 d = y_pow[yp]
                             data += c*d
                         pofs += 1
+            del chunk_x, chunk_y, x_pow, y_pow
+            gc.collect()
 
         # Convert NaNs to masked values
         for i, data in enumerate(datacube):
