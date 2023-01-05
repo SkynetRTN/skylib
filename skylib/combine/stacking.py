@@ -5,20 +5,15 @@ Image stacking.
 modes with optional scaling and outlier rejection.
 """
 
-from __future__ import absolute_import, division, print_function
-
 from datetime import timedelta
 import os.path
 import logging
 from typing import List, Optional, Tuple, Union
-import gc
 
-from numpy import (
-    argmax, array, bincount, empty, full, indices, int32, isnan, logical_or,
-    ma, median, nan, nanpercentile, ndarray, percentile as np_percentile,
-    zeros, zeros_like)
+import numpy as np
+from numpy import ma
 from numpy.linalg import lstsq
-from scipy.sparse import lil_array
+from scipy.sparse import csc_array
 from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
@@ -31,8 +26,9 @@ __all__ = ['combine']
 
 
 def _get_data(f: Union[pyfits.HDUList,
-                       Tuple[Union[ndarray, ma.MaskedArray], pyfits.Header]],
-              hdu_no: int) -> Union[ndarray, ma.MaskedArray]:
+                       Tuple[Union[np.ndarray, ma.MaskedArray],
+                             pyfits.Header]],
+              hdu_no: int) -> Union[np.ndarray, ma.MaskedArray]:
     """
     Return data array given input data item (either a FITS file or
     an array+header); handles masks and NaNs
@@ -48,10 +44,10 @@ def _get_data(f: Union[pyfits.HDUList,
         data = f[0]
     if data.dtype.kind != 'f':
         data = data.astype(float)
-    nans = isnan(data)
+    nans = np.isnan(data)
     if nans.any():
         if not isinstance(data, ma.MaskedArray):
-            data = ma.masked_array(data, zeros_like(data, bool))
+            data = ma.masked_array(data, np.zeros_like(data, bool))
         data.mask[nans] = True
     return data
 
@@ -59,7 +55,7 @@ def _get_data(f: Union[pyfits.HDUList,
 def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data_width: int, data_height: int,
                 input_data: List[Union[pyfits.HDUList,
-                                       Tuple[Union[ndarray, ma.MaskedArray],
+                                       Tuple[Union[np.ndarray, ma.MaskedArray],
                                              pyfits.Header]]],
                 mode: str = 'average', scaling: Optional[str] = None,
                 rejection: Optional[str] = None, min_keep: int = 2,
@@ -67,7 +63,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 lo: Optional[float] = None, hi: Optional[float] = None,
                 equalize_order: int = 1, max_mem_mb: float = 100.0,
                 callback: Optional[callable] = None) \
-        -> Tuple[Union[ndarray, ma.MaskedArray], float]:
+        -> Tuple[Union[np.ndarray, ma.MaskedArray], float]:
     """
     Combine the given HDUs from all input images; used by :func:`combine` to
     get a stack of either all input images or, if smart stacking is enabled,
@@ -91,13 +87,13 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
             elif scaling == 'percentile':
                 if percentile == 50:
-                    avg = median(data) \
+                    avg = np.median(data) \
                         if not isinstance(data, ma.MaskedArray) \
                         else ma.median(data)
                 else:
-                    avg = np_percentile(data, percentile) \
+                    avg = np.percentile(data, percentile) \
                         if not isinstance(data, ma.MaskedArray) \
-                        else np_percentile(data.compressed(), percentile)
+                        else np.percentile(data.compressed(), percentile)
 
             elif scaling == 'mode':
                 # Compute modal values from histograms; convert to integer
@@ -107,9 +103,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 else:
                     data = data.ravel()
                 min_val = data.min(initial=0)
-                avg = argmax(bincount(
+                avg = np.argmax(np.bincount(
                     (data - min_val).clip(0, 2*0x10000 - 1)
-                    .astype(int32))) + min_val
+                    .astype(np.int32))) + min_val
 
             elif scaling == 'equalize':
                 # Equalize the common image parts; suitable for mosaicing
@@ -128,7 +124,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     elif isinstance(other_data, ma.MaskedArray):
                         intersection = ~other_data.mask
                     else:
-                        intersection = array(True)
+                        intersection = np.array(True)
                     if not intersection.any():
                         continue
 
@@ -143,7 +139,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                         if isinstance(inters_data2, ma.MaskedArray):
                             inters_data2 = inters_data2.data
                     else:
-                        inters_y, inters_x = indices(data_shape)
+                        inters_y, inters_x = np.indices(data_shape)
                         if isinstance(data, ma.MaskedArray):
                             inters_data1 = data.data
                         else:
@@ -221,26 +217,23 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
         # Build the least-squares matrices
         use_sparse = m*n*8 > max_mem_mb*(1 << 20)
+        a_gen = {}  # only used if sparse
         if use_sparse:
-            # Too much RAM for a regular array, use scipy.sparse
-            a_lsq = lil_array((m, n), dtype=float)
+            # Too much RAM for a regular array, use scipy.sparse; a_data[col]
+            # is a list of (row#, data) pairs representing vertical slices
+            a_lsq = None
         else:
-            a_lsq = zeros((m, n))
-        b_lsq = empty(m, float)
+            a_lsq = np.zeros((m, n))
+        b_lsq = np.empty(m, float)
         skip = []
         row = 0
-
-        def getram():  # Current process resident RAM usage in Megabytes
-            with open('/proc/self/statm') as f:
-                return int(f.read().split()[1])*4096/(1<<20)
-
         for i, intersections_for_file in intersections.items():
             ic = param_offset[i]
             for j, (x, y, d) in intersections_for_file.items():
                 if (i, j) in skip:
                     continue
                 jc = param_offset[j]
-                np = len(d)
+                npoints = len(d)
 
                 # Compute all needed powers of x and y
                 x_pow, y_pow = [1], [1]
@@ -264,20 +257,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                 col = x_pow[xp]
                         else:
                             col = y_pow[yp]
-                        a_lsq[row:row + np, ic + pofs] = col
-                        a_lsq[row:row + np, jc + pofs] = -col
+                        if use_sparse:
+                            a_gen.setdefault(ic + pofs, []).append((row, col))
+                            a_gen.setdefault(jc + pofs, []).append((row, -col))
+                        else:
+                            a_lsq[row:row + npoints, ic + pofs] = col
+                            a_lsq[row:row + npoints, jc + pofs] = -col
                         pofs += 1
 
-                        del col
-                        gc.collect()
-                print(f'RAM ({i} {j}) {getram():.1f}')
-
-                # Explicitly deallocate temporary arrays to avoid memory leaks
-                del x_pow, y_pow
-                gc.collect()
-
-                b_lsq[row:row + np] = d
-                row += np
+                b_lsq[row:row + npoints] = d
+                row += npoints
                 # Set coeffs for each pair of intersecting images only once;
                 # setting them twice would overwrite the same coeffs with
                 # the same values but the opposite sign, which will only slow
@@ -286,7 +275,20 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
         # Compute the least-squares solution
         if use_sparse:
-            params = sparse_lstsq(a_lsq, b_lsq)[0]
+            # Reconstruct CSC representation
+            a_data, a_indices, a_indptr = [], [], [0]
+            for j in sorted(a_gen):
+                nonempty_rows = 0
+                for i, d in a_gen[j]:
+                    npoints = len(d)
+                    a_data.append(d)
+                    a_indices.append(np.arange(i, i + npoints))
+                    nonempty_rows += npoints
+                a_indptr.append(a_indptr[-1] + nonempty_rows)
+            # noinspection PyTypeChecker
+            params = sparse_lstsq(
+                csc_array((np.hstack(a_data), np.hstack(a_indices),
+                           np.array(a_indptr)), shape=(m, n)), b_lsq)[0]
         else:
             params = lstsq(a_lsq, b_lsq, rcond=None)[0]
         for i, ofs in param_offset.items():
@@ -326,7 +328,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
         # Equalize backgrounds
         if transformations:
-            chunk_y, chunk_x = indices(datacube[0].shape)
+            chunk_y, chunk_x = np.indices(datacube[0].shape)
             chunk_y += chunk
             x_pow, y_pow = [1], [1]
             if equalize_order > 0:
@@ -352,38 +354,36 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                 d = y_pow[yp]
                             data += c*d
                         pofs += 1
-            del chunk_x, chunk_y, x_pow, y_pow
-            gc.collect()
 
         # Convert NaNs to masked values
         for i, data in enumerate(datacube):
-            if isnan(data).any():
+            if np.isnan(data).any():
                 if not isinstance(data, ma.MaskedArray):
                     data = ma.masked_array(
-                        data, full(data.shape, False), fill_value=nan)
+                        data, np.full(data.shape, False), fill_value=np.nan)
                 elif not data.mask.shape:
-                    data.mask = full(data.shape, data.mask)
-                data.mask[isnan(data)] = True
+                    data.mask = np.full(data.shape, data.mask)
+                data.mask[np.isnan(data)] = True
                 datacube[i] = data
 
         initial_mask = None
         if rejection or any(isinstance(data, ma.MaskedArray)
                             for data in datacube):
-            datacube = ma.masked_array(datacube, fill_value=nan)
+            datacube = ma.masked_array(datacube, fill_value=np.nan)
             if not datacube.mask.shape:
                 # No initially masked data, but we'll need an array instead
                 # of mask=False to do slicing operations
-                datacube.mask = full(datacube.shape, datacube.mask)
+                datacube.mask = np.full(datacube.shape, datacube.mask)
 
             if propagate_mask:
                 # After stacking (and possibly rejection), we'll mask all
                 # pixels that are initially masked in at least one image
                 # (e.g. edges/corners after alignment)
-                initial_mask = logical_or.reduce(datacube.mask, axis=0)
+                initial_mask = np.logical_or.reduce(datacube.mask, axis=0)
                 if not initial_mask.any():
                     initial_mask = None
         else:
-            datacube = array(datacube)
+            datacube = np.array(datacube)
 
         if rejection in ('chauvenet', 'rcr'):
             if lo is None:
@@ -412,7 +412,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 # Mask "lo" smallest values and "hi" largest values along
                 # the 0th axis
                 order = datacube.argsort(0)
-                mg = tuple(i.ravel() for i in indices(datacube.shape[1:]))
+                mg = tuple(i.ravel() for i in np.indices(datacube.shape[1:]))
                 for j in range(-hi, lo):
                     datacube.mask[(order[j].ravel(),) + mg] = True
                 del order, mg
@@ -469,15 +469,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 if isinstance(datacube, ma.MaskedArray):
                     res = ma.median(datacube, 0)
                 else:
-                    res = median(datacube, 0)
+                    res = np.median(datacube, 0)
             else:
                 if isinstance(datacube, ma.MaskedArray):
                     res = ma.masked_array(
-                        nanpercentile(datacube.filled(nan), percentile, 0),
-                        zeros_like(datacube[0], bool))
-                    res[isnan(res)] = True
+                        np.nanpercentile(
+                            datacube.filled(np.nan), percentile, 0),
+                        np.zeros_like(datacube[0], bool))
+                    res[np.isnan(res)] = True
                 else:
-                    res = np_percentile(datacube, percentile, 0)
+                    res = np.percentile(datacube, percentile, 0)
         else:
             raise ValueError('Unknown stacking mode "{}"'.format(mode))
 
@@ -509,13 +510,13 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # them that makes the resulting mosaic background as flat as possible
         # by fitting the model in the entire mosaic
         npar = (equalize_order + 1)*(equalize_order + 2)//2
-        y, x = indices(data_shape)
+        y, x = np.indices(data_shape)
         x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
         x_pow, y_pow = [1, x], [1, y]
         for p in range(equalize_order - 1):
             x_pow.append(x_pow[-1]*x)
             y_pow.append(y_pow[-1]*y)
-        a_lsq = empty((len(x), npar))
+        a_lsq = np.empty((len(x), npar))
         pofs = 0
         for o in range(equalize_order + 1):
             for xp in range(o, -1, -1):
@@ -550,7 +551,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
 
 def combine(input_data: List[Union[pyfits.HDUList,
-                                   Tuple[Union[ndarray, ma.MaskedArray],
+                                   Tuple[Union[np.ndarray, ma.MaskedArray],
                                          pyfits.Header]]],
             mode: str = 'average', scaling: Optional[str] = None,
             rejection: Optional[str] = None, min_keep: int = 2,
@@ -559,7 +560,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             hi: Optional[Union[bool, int, float]] = None,
             equalize_order: int = 1, smart_stacking: Optional[str] = None,
             max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
-        -> List[Tuple[ndarray, pyfits.Header]]:
+        -> List[Tuple[np.ndarray, pyfits.Header]]:
     """
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
@@ -719,7 +720,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             for h in headers]
         have_exp_lengths = exp_lengths.count(None) < len(exp_lengths)
         if have_exp_lengths:
-            exp_lengths = array(
+            exp_lengths = np.array(
                 [float(l) if l is not None else 0.0 for l in exp_lengths])
         t_start, t_cen, t_end = tuple(zip(*[get_fits_time(h)
                                             for h in headers]))
@@ -751,9 +752,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
             # Calculate the average center time by converting to seconds since
             # the first exposure
             known_epochs = (
-                array([i for i, t in enumerate(t_cen) if t is not None]),)
+                np.array([i for i, t in enumerate(t_cen) if t is not None]),)
             t0 = min([t for t in t_cen if t is not None])
-            epochs = array(
+            epochs = np.array(
                 [(t - t0).total_seconds() for t in t_cen if t is not None])
             if have_exp_lengths:
                 total_exp = exp_lengths[known_epochs].sum()
