@@ -258,6 +258,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                         else:
                             col = y_pow[yp]
                         if use_sparse:
+                            if np.isscalar(col):
+                                col = np.full(npoints, col)
                             a_gen.setdefault(ic + pofs, []).append((row, col))
                             a_gen.setdefault(jc + pofs, []).append((row, -col))
                         else:
