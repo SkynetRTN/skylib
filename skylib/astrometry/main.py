@@ -17,6 +17,8 @@ import ctypes
 import numpy
 from astropy.wcs import Sip, WCS
 
+from skylib.util.angle import angdist
+
 from . import an_engine
 
 
@@ -79,11 +81,10 @@ class Solver(object):
                         continue
                     ra_h, ra_m = line[10:12], line[13:17]
                     dec_s, dec_d, dec_m = line[19], line[20:22], line[23:25]
-                    ra = (int(ra_h) + float(ra_m)/60)*15  # degrees
+                    ra = (int(ra_h) + float(ra_m)/60)
                     dec = (1 - 2*(dec_s == '-'))*(int(dec_d) + int(dec_m)/60.0)
                     r = float(line[33:38])/2
-                    # RA/Dec/radius in radians
-                    self.globs.append(numpy.deg2rad([ra, dec, r/60]))
+                    self.globs.append([ra, dec, r/60])
                 except Exception:
                     pass
 
@@ -398,16 +399,15 @@ def solve_field_glob(engine, xy, flux=None, width=None, height=None,
         n = len(xy)
         xy = numpy.asarray(xy)
         flux = numpy.asarray(flux)
-        ra, dec = numpy.deg2rad(sol.wcs.all_pix2world(xy[:, 0], xy[:, 1], 1))
-        radius = numpy.rad2deg((dec.max() - dec.min())/2)
+        ra, dec = sol.wcs.all_pix2world(xy[:, 0], xy[:, 1], 1)
+        ra /= 15
+        radius = (dec.max() - dec.min())/2
         for ra0, dec0, r0 in engine.globs:
             r = r0*initial_radius
             found = False
             prev_num_outer = None
             while True:
-                inner = 2*numpy.arcsin(numpy.sqrt(numpy.clip(
-                    numpy.cos(dec0)*numpy.cos(dec)*numpy.sin((ra0 - ra)/2)**2 +
-                    numpy.sin((dec0 - dec)/2)**2, 0, 1))) < r
+                inner = angdist(ra0, dec0, ra, dec) < r
                 num_inner = inner.sum()
                 if not num_inner:
                     # No sources within the current glob radius
