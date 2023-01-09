@@ -310,20 +310,22 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
 
     # Convert both images to [0,255) grayscale
     src_img = img
-    mn, mx = src_img.min(), src_img.max()
-    if isinstance(src_img, np.ma.MaskedArray):
-        src_img = src_img.filled(mn)
+    mn, mx = np.percentile(src_img, [10, 99])
     if mn >= mx:
         raise ValueError('Empty image')
-    src_img = ((src_img - mn)/(mx - mn)*255 + 0.5).astype(np.uint8)
+    if isinstance(src_img, np.ma.MaskedArray):
+        src_img = src_img.filled(mn)
+    src_img = (np.clip((src_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
 
     dst_img = ref_img
-    mn, mx = dst_img.min(), dst_img.max()
+    mn, mx = np.percentile(dst_img, [10, 99])
     if isinstance(dst_img, np.ma.MaskedArray):
         dst_img = dst_img.filled(mn)
     if mn >= mx:
         raise ValueError('Empty reference image')
-    dst_img = ((dst_img - mn)/(mx - mn)*255 + 0.5).astype(np.uint8)
+    dst_img = (np.clip((dst_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
 
     # Extract features
     if algorithm == 'AKAZE':
