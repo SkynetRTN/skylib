@@ -143,13 +143,15 @@ def get_fits_gain(hdr: Header) -> float:
 
 
 def get_fits_fov(hdr: Header) \
-        -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        -> Tuple[Optional[float], Optional[float], Optional[float],
+                 Optional[float], int, int]:
     """
     Get FOV RA/Dec and radius from FITS header
 
     :param hdr: FITS file header
 
-    :return: FOV center RA (hours), Dec (degrees), and radius (degrees); None
+    :return: FOV center RA (hours), Dec (degrees), and radius (degrees),
+        pixel scale (arcsec/pixel), and width and height (pixels); None
         if unknown
     """
     width, height = hdr.get('NAXIS1'), hdr.get('NAXIS2')
@@ -195,4 +197,4 @@ def get_fits_fov(hdr: Header) \
     if scale is not None and width and height:
         radius = hypot(width, height)/2*scale/3600
 
-    return ra0, dec0, radius
+    return ra0, dec0, radius, scale, width, height
