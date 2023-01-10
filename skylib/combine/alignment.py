@@ -302,6 +302,16 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
 
     :return: 2x2 linear transformation matrix and offset vector [dy, dx]
     """
+    if detect_edges:
+        img = np.hypot(
+            nd.sobel(img, 0, mode='nearest'),
+            nd.sobel(img, 1, mode='nearest')
+        )
+        ref_img = np.hypot(
+            nd.sobel(ref_img, 0, mode='nearest'),
+            nd.sobel(ref_img, 1, mode='nearest')
+        )
+
     # Convert both images to [0,255) grayscale
     src_img = img
     if percentile_min <= 0 and percentile_max >= 100:
@@ -313,12 +323,13 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
         mn = np.percentile(src_img, percentile_min)
         mx = src_img.max()
     else:
-        mn, mx = np.percentile(src_img, [10, 99])
+        mn, mx = np.percentile(src_img, [percentile_min, percentile_max])
     if mn >= mx:
         raise ValueError('Empty image')
     if isinstance(src_img, np.ma.MaskedArray):
         src_img = src_img.filled(mn)
-    src_img = (src_img - mn)/(mx - mn)*255
+    src_img = (np.clip((src_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
 
     dst_img = ref_img
     if percentile_min <= 0 and percentile_max >= 100:
@@ -330,25 +341,13 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
         mn = np.percentile(dst_img, percentile_min)
         mx = dst_img.max()
     else:
-        mn, mx = np.percentile(src_img, [10, 99])
+        mn, mx = np.percentile(src_img, [percentile_min, percentile_max])
     if isinstance(dst_img, np.ma.MaskedArray):
         dst_img = dst_img.filled(mn)
     if mn >= mx:
         raise ValueError('Empty reference image')
-    dst_img = (dst_img - mn)/(mx - mn)*255
-
-    if detect_edges:
-        src_img = np.hypot(
-            nd.sobel(src_img, 0, mode='nearest'),
-            nd.sobel(src_img, 1, mode='nearest')
-        )
-        dst_img = np.hypot(
-            nd.sobel(dst_img, 0, mode='nearest'),
-            nd.sobel(dst_img, 1, mode='nearest')
-        )
-
-    src_img = np.clip(src_img + 0.5, 0, 255).astype(np.uint8)
-    dst_img = np.clip(dst_img + 0.5, 0, 255).astype(np.uint8)
+    dst_img = (np.clip((dst_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
 
     # Extract features
     if algorithm == 'AKAZE':
