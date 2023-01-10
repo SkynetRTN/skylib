@@ -76,6 +76,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
     # Calculate offsets and scaling factors
     k_ref, k, offsets, overlaps = 1, [1]*n, [0]*n, {}
+    images_with_overlaps = []
     skip = []
     if scaling:
         for data_no, f in enumerate(input_data):
@@ -157,6 +158,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     overlaps_for_file[other_data_no] = (
                         inters_x.ravel(), inters_y.ravel(),
                         inters_data2 - inters_data1)
+                    if data_no not in images_with_overlaps:
+                        images_with_overlaps.append(data_no)
+                    if other_data_no not in images_with_overlaps:
+                        images_with_overlaps.append(other_data_no)
 
                 if overlaps_for_file:
                     overlaps[data_no] = overlaps_for_file
@@ -200,7 +205,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # = sum(M_k), where M_k is the number of points in k-th overlap,
         # k = 1...K, K = (total number of overlaps).
         npar = (equalize_order + 1)*(equalize_order + 2)//2
-        n = npar*len(overlaps)
+        n = npar*len(images_with_overlaps)
         m = 0
         for i, overlaps_for_file in overlaps.items():
             for j, (_, _, d) in overlaps_for_file.items():
@@ -212,7 +217,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # easily calculate this offset
         param_offset = {}
         ofs = 0
-        for i in overlaps.keys():
+        for i in images_with_overlaps:
             param_offset[i] = ofs
             ofs += npar
 
