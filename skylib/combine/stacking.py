@@ -75,7 +75,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     data_shape = ()
 
     # Calculate offsets and scaling factors
-    k_ref, k, offsets, intersections = 1, [1]*n, [0]*n, {}
+    k_ref, k, offsets, overlaps = 1, [1]*n, [0]*n, {}
+    skip = []
     if scaling:
         for data_no, f in enumerate(input_data):
             data = _get_data(f, hdu_no)
@@ -110,32 +111,37 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             elif scaling == 'equalize':
                 # Equalize the common image parts; suitable for mosaicing
                 avg = 0
-                # Identify all available intersections with the other images
-                intersections_for_file = {}
+                # Identify all available overlaps with the other images
+                overlaps_for_file = {}
                 for other_data_no, other_f in enumerate(input_data):
-                    if other_data_no == data_no:
+                    if other_data_no == data_no or \
+                            (data_no, other_data_no) in skip:
                         continue
+
+                    # Count each overlap only once
+                    skip.append((other_data_no, data_no))
+
                     other_data = _get_data(other_f, hdu_no)
                     if isinstance(data, ma.MaskedArray):
                         if isinstance(other_data, ma.MaskedArray):
-                            intersection = (~data.mask) & (~other_data.mask)
+                            overlap = (~data.mask) & (~other_data.mask)
                         else:
-                            intersection = ~data.mask
+                            overlap = ~data.mask
                     elif isinstance(other_data, ma.MaskedArray):
-                        intersection = ~other_data.mask
+                        overlap = ~other_data.mask
                     else:
-                        intersection = np.array(True)
-                    if not intersection.any():
+                        overlap = np.array(True)
+                    if not overlap.any():
                         continue
 
-                    # Found an intersection; save its coordinates and original
+                    # Found an overlap; save its coordinates and original
                     # pixel values for both intersecting images
-                    if intersection.shape:
-                        inters_y, inters_x = intersection.nonzero()
-                        inters_data1 = data[intersection]
+                    if overlap.shape:
+                        inters_y, inters_x = overlap.nonzero()
+                        inters_data1 = data[overlap]
                         if isinstance(inters_data1, ma.MaskedArray):
                             inters_data1 = inters_data1.data
-                        inters_data2 = other_data[intersection]
+                        inters_data2 = other_data[overlap]
                         if isinstance(inters_data2, ma.MaskedArray):
                             inters_data2 = inters_data2.data
                     else:
@@ -148,12 +154,12 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                             inters_data2 = other_data.data
                         else:
                             inters_data2 = other_data
-                    intersections_for_file[other_data_no] = (
+                    overlaps_for_file[other_data_no] = (
                         inters_x.ravel(), inters_y.ravel(),
                         inters_data2 - inters_data1)
 
-                if intersections_for_file:
-                    intersections[data_no] = intersections_for_file
+                if overlaps_for_file:
+                    overlaps[data_no] = overlaps_for_file
 
             else:
                 raise ValueError(
@@ -183,35 +189,30 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                         break
 
     transformations = {}
-    if scaling == 'equalize' and intersections:
+    if scaling == 'equalize' and overlaps:
         # In equalize mode, find the pixel value transformations for each image
-        # that minimize the difference in the areas of intersection. As long as
+        # that minimize the difference in the overlapping areas. As long as
         # the transformations are linear with respect to its parameters, this
         # is a sparse linear least-squares problem AX = B with MxN coefficient
         # matrix A, M-vector of observed differences B, and N-vector of
-        # parameters X; N = 3*(number of images that have intersections),
-        # M = (total number of intersecting points) = sum(M_k), where M_k is
-        # the number of points in k-th intersection, k = 1...K, K = (number of
-        # unique intersections).
+        # parameters X; N = (number of model parameters)*(number of images that
+        # have at least one overlap), M = (total number of overlapping points)
+        # = sum(M_k), where M_k is the number of points in k-th overlap,
+        # k = 1...K, K = (total number of overlaps).
         npar = (equalize_order + 1)*(equalize_order + 2)//2
-        n = npar*len(intersections)
+        n = npar*len(overlaps)
         m = 0
-        skip = []
-        # Count each pair of intersecting images only once
-        for i, intersections_for_file in intersections.items():
-            for j, (_, _, d) in intersections_for_file.items():
-                if (i, j) in skip:
-                    continue
+        for i, overlaps_for_file in overlaps.items():
+            for j, (_, _, d) in overlaps_for_file.items():
                 m += len(d)
-                skip.append((j, i))
 
-        # Since not all input images may have intersections, the offset of
+        # Since not all input images may have overlaps, the offset of
         # the triple of parameters (a, b, c) in the N-element vector of
         # parameters X for i-th image is not simply 3i; build a mapping to
         # easily calculate this offset
         param_offset = {}
         ofs = 0
-        for i in intersections.keys():
+        for i in overlaps.keys():
             param_offset[i] = ofs
             ofs += npar
 
@@ -225,13 +226,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         else:
             a_lsq = np.zeros((m, n))
         b_lsq = np.empty(m, float)
-        skip = []
         row = 0
-        for i, intersections_for_file in intersections.items():
+        for i, overlaps_for_file in overlaps.items():
             ic = param_offset[i]
-            for j, (x, y, d) in intersections_for_file.items():
-                if (i, j) in skip:
-                    continue
+            for j, (x, y, d) in overlaps_for_file.items():
                 jc = param_offset[j]
                 npoints = len(d)
 
@@ -269,11 +267,6 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
                 b_lsq[row:row + npoints] = d
                 row += npoints
-                # Set coeffs for each pair of intersecting images only once;
-                # setting them twice would overwrite the same coeffs with
-                # the same values but the opposite sign, which will only slow
-                # things down but won't change the result
-                skip.append((j, i))
 
         # Compute the least-squares solution
         if use_sparse:
@@ -510,7 +503,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # (the coefficient matrix rank is npar less than N (see above), so
         # in fact we have a family of least-squares solutions; choose one of
         # them that makes the resulting mosaic background as flat as possible
-        # by fitting the model in the entire mosaic
+        # by fitting the model to the entire mosaic
         npar = (equalize_order + 1)*(equalize_order + 2)//2
         y, x = np.indices(data_shape)
         x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
