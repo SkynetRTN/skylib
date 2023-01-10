@@ -341,7 +341,7 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
         mn = np.percentile(dst_img, percentile_min)
         mx = dst_img.max()
     else:
-        mn, mx = np.percentile(src_img, [percentile_min, percentile_max])
+        mn, mx = np.percentile(dst_img, [percentile_min, percentile_max])
     if isinstance(dst_img, np.ma.MaskedArray):
         dst_img = dst_img.filled(mn)
     if mn >= mx:
