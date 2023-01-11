@@ -5,10 +5,11 @@ Image stacking.
 modes with optional scaling and outlier rejection.
 """
 
-from datetime import timedelta
+import gc
 import os.path
 import logging
 from typing import List, Optional, Tuple, Union
+from datetime import timedelta
 
 import numpy as np
 from numpy import ma
@@ -126,6 +127,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     # Count each overlap only once
                     skip.append((other_data_no, data_no))
 
+                    gc.collect()
                     other_data = _get_data(other_f, hdu_no)
                     if isinstance(data, ma.MaskedArray):
                         if isinstance(other_data, ma.MaskedArray):
@@ -162,6 +164,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     overlaps_for_file[other_data_no] = (
                         inters_x.ravel(), inters_y.ravel(),
                         inters_data2 - inters_data1)
+                    del inters_data1, inters_data2
                     if data_no not in images_with_overlaps:
                         images_with_overlaps.append(data_no)
                     if other_data_no not in images_with_overlaps:
@@ -169,6 +172,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
                 if overlaps_for_file:
                     overlaps[data_no] = overlaps_for_file
+                    del overlaps_for_file
 
             else:
                 raise ValueError(
@@ -185,6 +189,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 k[data_no] = avg
                 offsets[data_no] = ofs
 
+            gc.collect()
             if callback is not None:
                 callback(progress + (data_no + 1)/n/2*progress_step)
 
@@ -273,9 +278,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                             a_lsq[row:row + npoints, ic + pofs] = col
                             a_lsq[row:row + npoints, jc + pofs] = -col
                         pofs += 1
+                        del col
+
+                del x_pow, y_pow
 
                 b_lsq[row:row + npoints] = d
                 row += npoints
+
+        del overlaps
+        gc.collect()
 
         # Compute the least-squares solution
         if use_sparse:
@@ -289,12 +300,16 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     a_indices.append(np.arange(i, i + npoints))
                     nonempty_rows += npoints
                 a_indptr.append(a_indptr[-1] + nonempty_rows)
+            del a_gen
             # noinspection PyTypeChecker
             params = sparse_lstsq(
                 csc_array((np.hstack(a_data), np.hstack(a_indices),
                            np.array(a_indptr)), shape=(m, n)), b_lsq)[0]
+            del a_data, a_indices, a_indptr, b_lsq
         else:
             params = lstsq(a_lsq, b_lsq, rcond=None)[0]
+            del a_lsq, b_lsq
+        gc.collect()
         for i, ofs in param_offset.items():
             transformations[i] = params[ofs:ofs + npar]
 
@@ -302,7 +317,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     bytes_per_pixel = max(
         abs((data[hdu_no].header if isinstance(data, pyfits.HDUList)
              else data[1])['BITPIX'])//8 for data in input_data) + 1
-    rowsize = data_width*bytes_per_pixel
+    rowsize = data_width*bytes_per_pixel*len(input_data)
     chunksize = min(max(int(max_mem_mb*(1 << 20)/rowsize), 1), data_height)
     while chunksize > 1:
         # Use as small chunks as possible but keep their total number
@@ -336,6 +351,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 for p in range(equalize_order - 1):
                     x_pow.append(x_pow[-1]*chunk_x)
                     y_pow.append(y_pow[-1]*chunk_y)
+            del chunk_x, chunk_y
             for i, coeffs in transformations.items():
                 data = datacube[i]
                 pofs = 0
@@ -353,6 +369,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                 d = y_pow[yp]
                             data += c*d
                         pofs += 1
+            del x_pow, y_pow
+            gc.collect()
 
         initial_mask = None
         if rejection or any(isinstance(data, ma.MaskedArray)
@@ -372,6 +390,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     initial_mask = None
         else:
             datacube = np.array(datacube)
+        gc.collect()
 
         if rejection in ('chauvenet', 'rcr'):
             if lo is None:
@@ -404,6 +423,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 for j in range(-hi, lo):
                     datacube.mask[(order[j].ravel(),) + mg] = True
                 del order, mg
+                gc.collect()
         elif rejection == 'minmax':
             if lo is not None and hi is not None:
                 if lo > hi:
@@ -435,6 +455,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     del avg, sigma, resid, outliers
                     break
                 datacube.mask[outliers.nonzero()] = True
+            gc.collect()
         elif rejection:
             raise ValueError(
                 'Unknown rejection mode "{}"'.format(rejection))
@@ -649,10 +670,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
         data_width = data_height = 0
         for data in input_data:
             if isinstance(data, pyfits.HDUList):
-                data = data[hdu_no].data
+                hdr = data[hdu_no].header
             else:
-                data = data[0]
-            h, w = data.shape
+                hdr = data[1]
+            w, h = hdr['NAXIS1'], hdr['NAXIS2']
             if not data_width:
                 data_width, data_height = w, h
             elif (data_width, data_height) != (w, h):
