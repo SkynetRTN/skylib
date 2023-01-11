@@ -28,20 +28,24 @@ __all__ = ['combine']
 def _get_data(f: Union[pyfits.HDUList,
                        Tuple[Union[np.ndarray, ma.MaskedArray],
                              pyfits.Header]],
-              hdu_no: int) -> Union[np.ndarray, ma.MaskedArray]:
+              hdu_no: int,
+              start: int = 0,
+              end: Optional[int] = None) -> Union[np.ndarray, ma.MaskedArray]:
     """
     Return data array given input data item (either a FITS file or
     an array+header); handles masks and NaNs
 
     :param f: input data item, as passed to :func:`combine` as `input_data`
     :param hdu_no: optional FITS HDU number if applicable
+    :param start: starting row of data to load
+    :param end: ending data row to load
 
     :return: data array (masked or unmasked)
     """
     if isinstance(f, pyfits.HDUList):
-        data = f[hdu_no].data
+        data = f[hdu_no].data[start:end]
     else:
-        data = f[0]
+        data = f[0][start:end]
     if data.dtype.kind != 'f':
         data = data.astype(float)
     nans = np.isnan(data)
@@ -295,15 +299,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             transformations[i] = params[ofs:ofs + npar]
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
-    rowsize = 0
-    for data in input_data:
-        if isinstance(data, pyfits.HDUList):
-            data = data[hdu_no].data
-        else:
-            data = data[0]
-        rowsize += data[0].nbytes
-        if rejection or isinstance(data, ma.MaskedArray):
-            rowsize += data_width
+    bytes_per_pixel = max(
+        abs((data[hdu_no].header if isinstance(data, pyfits.HDUList)
+             else data[1])['BITPIX'])//8 for data in input_data) + 1
+    rowsize = data_width*bytes_per_pixel
     chunksize = min(max(int(max_mem_mb*(1 << 20)/rowsize), 1), data_height)
     while chunksize > 1:
         # Use as small chunks as possible but keep their total number
@@ -315,7 +314,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     rej_percent = 0
     for chunk in range(0, data_height, chunksize):
         datacube = [
-            _get_data(f, hdu_no).data[chunk:chunk + chunksize]
+            _get_data(f, hdu_no, chunk, chunk + chunksize)
             for f in input_data
         ]
 
@@ -355,17 +354,6 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                             data += c*d
                         pofs += 1
 
-        # Convert NaNs to masked values
-        for i, data in enumerate(datacube):
-            if np.isnan(data).any():
-                if not isinstance(data, ma.MaskedArray):
-                    data = ma.masked_array(
-                        data, np.full(data.shape, False), fill_value=np.nan)
-                elif not data.mask.shape:
-                    data.mask = np.full(data.shape, data.mask)
-                data.mask[np.isnan(data)] = True
-                datacube[i] = data
-
         initial_mask = None
         if rejection or any(isinstance(data, ma.MaskedArray)
                             for data in datacube):
@@ -397,7 +385,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 mean_type = 'mean'
                 sigma_type = 'stddev'
             datacube.mask = chauvenet(
-                datacube,  min_vals=min_keep, mean=mean_type, sigma=sigma_type,
+                datacube, min_vals=min_keep, mean=mean_type, sigma=sigma_type,
                 clip_lo=lo, clip_hi=hi)
         elif rejection == 'iraf':
             if lo is None:
