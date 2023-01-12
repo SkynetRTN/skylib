@@ -13,48 +13,16 @@ from datetime import timedelta
 
 import numpy as np
 from numpy import ma
-from numpy.linalg import lstsq
-from scipy.sparse import csc_array
-from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
 from ..util.fits import get_fits_time
+from .mosaicing import get_equalization_transforms, global_equalize
 from .smart_stacking import smart_stacking_score
+from .util import get_data
 
 
 __all__ = ['combine']
-
-
-def _get_data(f: Union[pyfits.HDUList,
-                       Tuple[Union[np.ndarray, ma.MaskedArray],
-                             pyfits.Header]],
-              hdu_no: int,
-              start: int = 0,
-              end: Optional[int] = None) -> Union[np.ndarray, ma.MaskedArray]:
-    """
-    Return data array given input data item (either a FITS file or
-    an array+header); handles masks and NaNs
-
-    :param f: input data item, as passed to :func:`combine` as `input_data`
-    :param hdu_no: optional FITS HDU number if applicable
-    :param start: starting row of data to load
-    :param end: ending data row to load
-
-    :return: data array (masked or unmasked)
-    """
-    if isinstance(f, pyfits.HDUList):
-        data = f[hdu_no].data[start:end]
-    else:
-        data = f[0][start:end]
-    if data.dtype.kind != 'f':
-        data = data.astype(float)
-    nans = np.isnan(data)
-    if nans.any():
-        if not isinstance(data, ma.MaskedArray):
-            data = ma.masked_array(data, np.zeros_like(data, bool))
-        data.mask[nans] = True
-    return data
 
 
 def _do_combine(hdu_no: int, progress: float, progress_step: float,
@@ -77,17 +45,18 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     :return: image stack data and rejection percent
     """
     n = len(input_data)
-    data_shape = ()
 
-    # Calculate offsets and scaling factors
-    k_ref, k, offsets, overlaps = 1, [1]*n, [0]*n, {}
-    images_with_overlaps = []
-    skip = []
-    if scaling:
+    k_ref, k, offsets, transformations = 1, [1]*n, [0]*n, {}
+    if scaling == 'equalize':
+        # Equalize the common image parts; suitable for mosaicing
+        transformations = get_equalization_transforms(
+            hdu_no, progress, progress_step, data_width, data_height,
+            input_data, equalize_order, max_mem_mb, callback)
+
+    elif scaling:
+        # Calculate offsets and scaling factors
         for data_no, f in enumerate(input_data):
-            data = _get_data(f, hdu_no)
-            if not data_shape:
-                data_shape = data.shape
+            data = get_data(f, hdu_no)
 
             if scaling == 'average':
                 avg = data.mean()
@@ -114,204 +83,31 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     (data - min_val).clip(0, 2*0x10000 - 1)
                     .astype(np.int32))) + min_val
 
-            elif scaling == 'equalize':
-                # Equalize the common image parts; suitable for mosaicing
-                avg = 0
-                # Identify all available overlaps with the other images
-                overlaps_for_file = {}
-                for other_data_no, other_f in enumerate(input_data):
-                    if other_data_no == data_no or \
-                            (data_no, other_data_no) in skip:
-                        continue
-
-                    # Count each overlap only once
-                    skip.append((other_data_no, data_no))
-
-                    gc.collect()
-                    other_data = _get_data(other_f, hdu_no)
-                    if isinstance(data, ma.MaskedArray):
-                        if isinstance(other_data, ma.MaskedArray):
-                            overlap = (~data.mask) & (~other_data.mask)
-                        else:
-                            overlap = ~data.mask
-                    elif isinstance(other_data, ma.MaskedArray):
-                        overlap = ~other_data.mask
-                    else:
-                        overlap = np.array(True)
-                    if not overlap.any():
-                        continue
-
-                    # Found an overlap; save its coordinates and original
-                    # pixel values for both intersecting images
-                    if overlap.shape:
-                        inters_y, inters_x = overlap.nonzero()
-                        inters_data1 = data[overlap]
-                        if isinstance(inters_data1, ma.MaskedArray):
-                            inters_data1 = inters_data1.data
-                        inters_data2 = other_data[overlap]
-                        if isinstance(inters_data2, ma.MaskedArray):
-                            inters_data2 = inters_data2.data
-                    else:
-                        inters_y, inters_x = np.indices(data_shape)
-                        if isinstance(data, ma.MaskedArray):
-                            inters_data1 = data.data
-                        else:
-                            inters_data1 = data
-                        if isinstance(other_data, ma.MaskedArray):
-                            inters_data2 = other_data.data
-                        else:
-                            inters_data2 = other_data
-                    overlaps_for_file[other_data_no] = (
-                        inters_x.ravel(), inters_y.ravel(),
-                        inters_data2 - inters_data1)
-                    del inters_data1, inters_data2
-                    if data_no not in images_with_overlaps:
-                        images_with_overlaps.append(data_no)
-                    if other_data_no not in images_with_overlaps:
-                        images_with_overlaps.append(other_data_no)
-
-                if overlaps_for_file:
-                    overlaps[data_no] = overlaps_for_file
-                    del overlaps_for_file
-
             else:
                 raise ValueError(
                     'Unknown scaling mode "{}"'.format(scaling))
 
-            if scaling != 'equalize':
-                if avg > 0:
-                    ofs = 0
-                else:
-                    # To make sure that all images are scaled by a positive
-                    # factor, add a constant offset to the image so that its
-                    # average = 1
-                    ofs, avg = 1 - avg, 1
-                k[data_no] = avg
-                offsets[data_no] = ofs
+            if avg > 0:
+                ofs = 0
+            else:
+                # To make sure that all images are scaled by a positive
+                # factor, add a constant offset to the image so that its
+                # average = 1
+                ofs, avg = 1 - avg, 1
+            k[data_no] = avg
+            offsets[data_no] = ofs
 
             gc.collect()
             if callback is not None:
                 callback(progress + (data_no + 1)/n/2*progress_step)
 
-        if scaling != 'equalize':
-            # Normalize to the first frame with positive average
-            k_ref = k[0]
-            if k_ref == 1:
-                for ki in k[1:]:
-                    if ki != 1:
-                        k_ref = ki
-                        break
-
-    transformations = {}
-    if scaling == 'equalize' and overlaps:
-        # In equalize mode, find the pixel value transformations for each image
-        # that minimize the difference in the overlapping areas. As long as
-        # the transformations are linear with respect to its parameters, this
-        # is a sparse linear least-squares problem AX = B with MxN coefficient
-        # matrix A, M-vector of observed differences B, and N-vector of
-        # parameters X; N = (number of model parameters)*(number of images that
-        # have at least one overlap), M = (total number of overlapping points)
-        # = sum(M_k), where M_k is the number of points in k-th overlap,
-        # k = 1...K, K = (total number of overlaps).
-        npar = (equalize_order + 1)*(equalize_order + 2)//2
-        n = npar*len(images_with_overlaps)
-        m = 0
-        for i, overlaps_for_file in overlaps.items():
-            for j, (_, _, d) in overlaps_for_file.items():
-                m += len(d)
-
-        # Since not all input images may have overlaps, the offset of
-        # the triple of parameters (a, b, c) in the N-element vector of
-        # parameters X for i-th image is not simply 3i; build a mapping to
-        # easily calculate this offset
-        param_offset = {}
-        ofs = 0
-        for i in images_with_overlaps:
-            param_offset[i] = ofs
-            ofs += npar
-
-        # Build the least-squares matrices
-        use_sparse = m*n*8 > max_mem_mb*(1 << 20)
-        a_gen = {}  # only used if sparse
-        if use_sparse:
-            # Too much RAM for a regular array, use scipy.sparse; a_data[col]
-            # is a list of (row#, data) pairs representing vertical slices
-            a_lsq = None
-        else:
-            a_lsq = np.zeros((m, n))
-        b_lsq = np.empty(m, float)
-        row = 0
-        for i, overlaps_for_file in overlaps.items():
-            ic = param_offset[i]
-            for j, (x, y, d) in overlaps_for_file.items():
-                jc = param_offset[j]
-                npoints = len(d)
-
-                # Compute all needed powers of x and y
-                x_pow, y_pow = [1], [1]
-                if equalize_order > 0:
-                    x_pow.append(x)
-                    y_pow.append(y)
-                    for p in range(equalize_order - 1):
-                        x_pow.append(x_pow[-1]*x)
-                        y_pow.append(y_pow[-1]*y)
-
-                # Set i-th column(s) in the following order: 1, x, y, x^2, xy,
-                # y^2, etc., and the same for j, but with the opposite sign
-                pofs = 0
-                for o in range(equalize_order + 1):
-                    for xp in range(o, -1, -1):
-                        yp = o - xp
-                        if xp:
-                            if yp:
-                                col = x_pow[xp]*y_pow[yp]
-                            else:
-                                col = x_pow[xp]
-                        else:
-                            col = y_pow[yp]
-                        if use_sparse:
-                            if np.isscalar(col):
-                                col = np.full(npoints, col)
-                            a_gen.setdefault(ic + pofs, []).append((row, col))
-                            a_gen.setdefault(jc + pofs, []).append((row, -col))
-                        else:
-                            a_lsq[row:row + npoints, ic + pofs] = col
-                            a_lsq[row:row + npoints, jc + pofs] = -col
-                        pofs += 1
-                        del col
-
-                del x_pow, y_pow
-
-                b_lsq[row:row + npoints] = d
-                row += npoints
-
-        del overlaps
-        gc.collect()
-
-        # Compute the least-squares solution
-        if use_sparse:
-            # Reconstruct CSC representation
-            a_data, a_indices, a_indptr = [], [], [0]
-            for j in sorted(a_gen):
-                nonempty_rows = 0
-                for i, d in a_gen[j]:
-                    npoints = len(d)
-                    a_data.append(d)
-                    a_indices.append(np.arange(i, i + npoints))
-                    nonempty_rows += npoints
-                a_indptr.append(a_indptr[-1] + nonempty_rows)
-            del a_gen
-            # noinspection PyTypeChecker
-            params = sparse_lstsq(
-                csc_array((np.hstack(a_data), np.hstack(a_indices),
-                           np.array(a_indptr)), shape=(m, n)), b_lsq)[0]
-            del a_data, a_indices, a_indptr, b_lsq
-        else:
-            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-            del a_lsq, b_lsq
-        gc.collect()
-        for i, ofs in param_offset.items():
-            transformations[i] = params[ofs:ofs + npar]
+        # Normalize to the first frame with positive average
+        k_ref = k[0]
+        if k_ref == 1:
+            for ki in k[1:]:
+                if ki != 1:
+                    k_ref = ki
+                    break
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     bytes_per_pixel = max(
@@ -329,7 +125,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     rej_percent = 0
     for chunk in range(0, data_height, chunksize):
         datacube = [
-            _get_data(f, hdu_no, chunk, chunk + chunksize)
+            get_data(f, hdu_no, chunk, chunk + chunksize)
             for f in input_data
         ]
 
@@ -518,43 +314,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # in fact we have a family of least-squares solutions; choose one of
         # them that makes the resulting mosaic background as flat as possible
         # by fitting the model to the entire mosaic
-        npar = (equalize_order + 1)*(equalize_order + 2)//2
-        y, x = np.indices(data_shape)
-        x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
-        x_pow, y_pow = [1, x], [1, y]
-        for p in range(equalize_order - 1):
-            x_pow.append(x_pow[-1]*x)
-            y_pow.append(y_pow[-1]*y)
-        a_lsq = np.empty((len(x), npar))
-        pofs = 0
-        for o in range(equalize_order + 1):
-            for xp in range(o, -1, -1):
-                yp = o - xp
-                if xp:
-                    if yp:
-                        col = x_pow[xp]*y_pow[yp]
-                    else:
-                        col = x_pow[xp]
-                else:
-                    col = y_pow[yp]
-                a_lsq[:, pofs] = col
-                pofs += 1
-        params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-        pofs = 0
-        for o in range(equalize_order + 1):
-            for xp in range(o, -1, -1):
-                c = params[pofs]
-                if c:
-                    yp = o - xp
-                    if xp:
-                        if yp:
-                            col = x_pow[xp]*y_pow[yp]
-                        else:
-                            col = x_pow[xp]
-                    else:
-                        col = y_pow[yp]
-                    b_lsq -= c*col
-                pofs += 1
+        res = global_equalize(res, equalize_order)
 
     return res, rej_percent
 
