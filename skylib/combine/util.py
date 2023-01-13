@@ -32,7 +32,10 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
     :return: data array (masked or unmasked)
     """
     if isinstance(f, pyfits.HDUList):
-        data = f[hdu_no].data[start:end]
+        if start or end:
+            data = f[hdu_no].section[start:end]
+        else:
+            data = f[hdu_no].data
     else:
         data = f[0][start:end]
     if data.dtype.kind != 'f':
