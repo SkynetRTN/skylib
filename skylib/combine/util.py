@@ -33,13 +33,7 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
     """
     if isinstance(f, pyfits.HDUList):
         if start or end:
-            if start:
-                if end:
-                    data = f[hdu_no].section[start:end]
-                else:
-                    data = f[hdu_no].section[start:]
-            else:
-                data = f[hdu_no].section[:end]
+            data = f[hdu_no].section[start:end]
         else:
             data = f[hdu_no].data
     else:
@@ -49,8 +43,12 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
     nans = np.isnan(data)
     if nans.any():
         if not isinstance(data, ma.MaskedArray):
-            data = ma.masked_array(data, np.zeros_like(data, bool))
-        data.mask[nans] = True
+            data = ma.masked_array(data, nans)
+        else:
+            if data.mask.shape:
+                data.mask[nans] = True
+            else:
+                data.mask = nans
     if downsample < 2:
         return data
 
@@ -64,8 +62,8 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
         data = data[:, :width*downsample]
     if not isinstance(data, ma.MaskedArray) or not np.shape(data.mask):
         return (
-                data.reshape(height, downsample, width, downsample)
-                .sum(3).sum(1)/downsample**2).astype(data.dtype)
+            data.reshape(height, downsample, width, downsample)
+            .sum(3).sum(1)/downsample**2).astype(data.dtype)
     return ma.masked_array(
         (data.data.reshape(height, downsample, width, downsample)
          .sum(3).sum(1)/downsample**2).astype(data.dtype),
