@@ -34,7 +34,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 rejection: Optional[str] = None, min_keep: int = 2,
                 propagate_mask: bool = True, percentile: float = 50.0,
                 lo: Optional[float] = None, hi: Optional[float] = None,
-                equalize_order: int = 1, max_mem_mb: float = 100.0,
+                equalize_additive: bool = False, equalize_order: int = 1,
+                equalize_multiplicative: bool = True,
+                equalize_global: bool = False,
+                max_mem_mb: float = 100.0,
                 callback: Optional[callable] = None) \
         -> Tuple[Union[np.ndarray, ma.MaskedArray], float]:
     """
@@ -47,13 +50,14 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     n = len(input_data)
 
     k_ref, k, offsets, transformations = 1, [1]*n, [0]*n, {}
-    if scaling == 'equalize':
+    if equalize_additive or equalize_multiplicative:
         # Equalize the common image parts; suitable for mosaicing
         transformations = get_equalization_transforms(
             hdu_no, progress, progress_step, data_width, data_height,
-            input_data, equalize_order, max_mem_mb, callback)
+            input_data, equalize_additive, equalize_order,
+            equalize_multiplicative, max_mem_mb, callback)
 
-    elif scaling:
+    if scaling:
         # Calculate offsets and scaling factors
         for data_no, f in enumerate(input_data):
             data = get_data(f, hdu_no)
@@ -138,33 +142,40 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
         # Equalize backgrounds
         if transformations:
-            chunk_y, chunk_x = np.indices(datacube[0].shape)
-            chunk_y += chunk
-            x_pow, y_pow = [1], [1]
-            if equalize_order > 0:
-                x_pow.append(chunk_x)
-                y_pow.append(chunk_y)
-                for p in range(equalize_order - 1):
-                    x_pow.append(x_pow[-1]*chunk_x)
-                    y_pow.append(y_pow[-1]*chunk_y)
-            del chunk_x, chunk_y
+            if equalize_additive:
+                chunk_y, chunk_x = np.indices(datacube[0].shape)
+                chunk_y += chunk
+                x_pow, y_pow = [1], [1]
+                if equalize_order > 0:
+                    x_pow.append(chunk_x)
+                    y_pow.append(chunk_y)
+                    for p in range(equalize_order - 1):
+                        x_pow.append(x_pow[-1]*chunk_x)
+                        y_pow.append(y_pow[-1]*chunk_y)
+                del chunk_x, chunk_y
+            else:
+                x_pow = y_pow = None
             for i, coeffs in transformations.items():
                 data = datacube[i]
                 pofs = 0
-                for o in range(equalize_order + 1):
-                    for xp in range(o, -1, -1):
-                        c = coeffs[pofs]
-                        if c:
-                            yp = o - xp
-                            if xp:
-                                if yp:
-                                    d = x_pow[xp]*y_pow[yp]
+                if equalize_additive:
+                    for o in range(equalize_order + 1):
+                        for xp in range(o, -1, -1):
+                            c = coeffs[pofs]
+                            if c:
+                                yp = o - xp
+                                if xp:
+                                    if yp:
+                                        d = x_pow[xp]*y_pow[yp]
+                                    else:
+                                        d = x_pow[xp]
                                 else:
-                                    d = x_pow[xp]
-                            else:
-                                d = y_pow[yp]
-                            data += c*d
-                        pofs += 1
+                                    d = y_pow[yp]
+                                data += c*d
+                            pofs += 1
+                if equalize_multiplicative:
+                    data /= coeffs[pofs]
+                    pofs += 1
             del x_pow, y_pow
             gc.collect()
 
@@ -308,7 +319,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             res.mask is None or res.mask is False or not res.mask.any()):
         res = res.data
 
-    if transformations and equalize_order > 0:
+    if transformations and equalize_global and equalize_order > 0:
         # The background equalization least-squares system is degenerate
         # (the coefficient matrix rank is npar less than N (see above), so
         # in fact we have a family of least-squares solutions; choose one of
@@ -327,8 +338,11 @@ def combine(input_data: List[Union[pyfits.HDUList,
             propagate_mask: bool = True, percentile: float = 50.0,
             lo: Optional[Union[bool, int, float]] = None,
             hi: Optional[Union[bool, int, float]] = None,
-            equalize_order: int = 1, smart_stacking: Optional[str] = None,
-            max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
+            equalize_additive: bool = False, equalize_order: int = 0,
+            equalize_multiplicative: bool = True,
+            equalize_global: bool = False,
+            smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
+            callback: Optional[callable] = None) \
         -> List[Tuple[np.ndarray, pyfits.Header]]:
     """
     Combine a series of FITS images using the various stacking modes with
@@ -342,7 +356,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
     :param scaling: scaling mode: None (default) - do not scale data,
         "average" - scale data to match average values, "percentile" - match
         the given percentile (median for `percentile` = 50), "mode" - match
-        modal values, "equalize" - match image backgrounds for mosaicing
+        modal values
     :param rejection: outlier rejection mode: None (default) - do not reject
         outliers, "chauvenet" - use classic Chauvenet rejection, "rcr" - use
         super-simplified Robust Chauvenet Rejection, "iraf" - IRAF-like
@@ -372,8 +386,11 @@ def combine(input_data: List[Union[pyfits.HDUList,
             above the baseline; default: 3
         `rejection` = "chauvenet" or "rcr": (bool) reject positive outliers;
             default: True
-    :param equalize_order: background equalization polynomial order; used with
-        `scaling` = "equalize"
+    :param equalize_additive: enable additive equalization for mosaicing
+    :param equalize_order: additive equalization polynomial order
+    :param equalize_multiplicative: enable multiplicative mosaic equalization
+    :param equalize_global: enable additive background flattening using
+        `equalize_order` model
     :param smart_stacking: enable smart stacking: automatically exclude those
         images from the stack that will not improve its quality in a certain
         sense; currently supported modes:
@@ -446,7 +463,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
         res, rej_percent = _do_combine(
             hdu_no, total_progress, progress_step, data_width, data_height,
             input_data, mode, scaling, rejection, min_keep, propagate_mask,
-            percentile, lo, hi, equalize_order, max_mem_mb, callback)
+            percentile, lo, hi, equalize_additive, equalize_order,
+            equalize_multiplicative, equalize_global, max_mem_mb, callback)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -467,7 +485,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 new_res, new_rej_percent = _do_combine(
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
-                    propagate_mask, percentile, lo, hi, equalize_order,
+                    propagate_mask, percentile, lo, hi, equalize_additive,
+                    equalize_order, equalize_multiplicative, equalize_global,
                     max_mem_mb, callback)
                 total_progress += progress_step
                 new_score = score_func(new_res)
