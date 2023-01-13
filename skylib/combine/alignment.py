@@ -302,6 +302,65 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
 
     :return: 2x2 linear transformation matrix and offset vector [dy, dx]
     """
+    # Convert both images to [0,255) grayscale
+    src_img = img
+    if percentile_min <= 0 and percentile_max >= 100:
+        mn, mx = src_img.min(), src_img.max()
+    elif percentile_min <= 0:
+        mn = src_img.min()
+        if isinstance(src_img, np.ma.MaskedArray):
+            mx = np.nanpercentile(src_img.filled(np.nan), percentile_max)
+        else:
+            mx = np.nanpercentile(src_img, percentile_max)
+    elif percentile_max >= 100:
+        if isinstance(src_img, np.ma.MaskedArray):
+            mn = np.nanpercentile(src_img.filled(np.nan), percentile_min)
+        else:
+            mn = np.nanpercentile(src_img, percentile_min)
+        mx = src_img.max()
+    else:
+        if isinstance(src_img, np.ma.MaskedArray):
+            mn, mx = np.nanpercentile(
+                src_img.filled(np.nan), [percentile_min, percentile_max])
+        else:
+            mn, mx = np.nanpercentile(
+                src_img, [percentile_min, percentile_max])
+    if mn >= mx:
+        raise ValueError('Empty image')
+    if not isinstance(src_img, np.ma.MaskedArray):
+        src_img = np.ma.masked_invalid(src_img)
+    src_img = (np.clip((src_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
+
+    dst_img = ref_img
+    if percentile_min <= 0 and percentile_max >= 100:
+        mn, mx = dst_img.min(), dst_img.max()
+    elif percentile_min <= 0:
+        mn = dst_img.min()
+        if isinstance(dst_img, np.ma.MaskedArray):
+            mx = np.nanpercentile(dst_img.filled(np.nan), percentile_max)
+        else:
+            mx = np.nanpercentile(dst_img, percentile_max)
+    elif percentile_max >= 100:
+        if isinstance(dst_img, np.ma.MaskedArray):
+            mn = np.nanpercentile(dst_img.filled(np.nan), percentile_min)
+        else:
+            mn = np.nanpercentile(dst_img, percentile_min)
+        mx = dst_img.max()
+    else:
+        if isinstance(dst_img, np.ma.MaskedArray):
+            mn, mx = np.nanpercentile(
+                dst_img.filled(np.nan), [percentile_min, percentile_max])
+        else:
+            mn, mx = np.nanpercentile(
+                dst_img, [percentile_min, percentile_max])
+    if mn >= mx:
+        raise ValueError('Empty reference image')
+    if not isinstance(dst_img, np.ma.MaskedArray):
+        dst_img = np.ma.masked_invalid(dst_img)
+    dst_img = (np.clip((dst_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
+
     if detect_edges:
         img = np.hypot(
             nd.sobel(img, 0, mode='nearest'),
@@ -311,43 +370,6 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
             nd.sobel(ref_img, 0, mode='nearest'),
             nd.sobel(ref_img, 1, mode='nearest')
         )
-
-    # Convert both images to [0,255) grayscale
-    src_img = img
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = src_img.min(), src_img.max()
-    elif percentile_min <= 0:
-        mn = src_img.min()
-        mx = np.percentile(src_img, percentile_max)
-    elif percentile_max >= 100:
-        mn = np.percentile(src_img, percentile_min)
-        mx = src_img.max()
-    else:
-        mn, mx = np.percentile(src_img, [percentile_min, percentile_max])
-    if mn >= mx:
-        raise ValueError('Empty image')
-    if isinstance(src_img, np.ma.MaskedArray):
-        src_img = src_img.filled(mn)
-    src_img = (np.clip((src_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
-
-    dst_img = ref_img
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = dst_img.min(), dst_img.max()
-    elif percentile_min <= 0:
-        mn = dst_img.min()
-        mx = np.percentile(dst_img, percentile_max)
-    elif percentile_max >= 100:
-        mn = np.percentile(dst_img, percentile_min)
-        mx = dst_img.max()
-    else:
-        mn, mx = np.percentile(dst_img, [percentile_min, percentile_max])
-    if isinstance(dst_img, np.ma.MaskedArray):
-        dst_img = dst_img.filled(mn)
-    if mn >= mx:
-        raise ValueError('Empty reference image')
-    dst_img = (np.clip((dst_img - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
 
     # Extract features
     if algorithm == 'AKAZE':
