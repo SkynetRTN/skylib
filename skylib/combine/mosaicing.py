@@ -144,6 +144,9 @@ def get_equalization_transforms(
                     overlap_data2 = other_data
                 m += data.shape[0]*data.shape[1]
             del overlap, other_data
+            if downsample > 1:
+                overlap_x *= downsample
+                overlap_y *= downsample
             overlaps_for_file[other_data_no] = (
                 overlap_x.astype(np.int32).ravel(),
                 overlap_y.astype(np.int32).ravel(),
