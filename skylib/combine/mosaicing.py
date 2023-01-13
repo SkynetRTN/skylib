@@ -133,7 +133,7 @@ def get_equalization_transforms(
                     overlap_data2 = overlap_data2.data
                 m += overlap.sum()
             else:
-                overlap_y, overlap_x = np.indices((data_height, data_width))
+                overlap_y, overlap_x = np.indices(data.shape)
                 if isinstance(data, ma.MaskedArray):
                     overlap_data1 = data.data
                 else:
@@ -150,7 +150,7 @@ def get_equalization_transforms(
             overlaps_for_file[other_data_no] = (
                 overlap_x.astype(np.int32).ravel(),
                 overlap_y.astype(np.int32).ravel(),
-                overlap_data2 - overlap_data1)
+                (overlap_data2 - overlap_data1).ravel())
             del overlap_data1, overlap_data2, overlap_x, overlap_y
             if data_no not in images_with_overlaps:
                 images_with_overlaps.append(data_no)
@@ -210,7 +210,7 @@ def get_equalization_transforms(
                 jc = param_offset[j]
                 npoints = len(d)
 
-                # Compute all needed powers of x and y
+                # Compute all required powers of x and y
                 x_pow, y_pow = [1], [1]
                 if equalize_order > 0:
                     x_pow.append(x)
