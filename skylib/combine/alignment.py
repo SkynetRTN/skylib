@@ -302,6 +302,16 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
 
     :return: 2x2 linear transformation matrix and offset vector [dy, dx]
     """
+    if detect_edges:
+        img = np.hypot(
+            nd.sobel(img, 0, mode='nearest'),
+            nd.sobel(img, 1, mode='nearest')
+        )
+        ref_img = np.hypot(
+            nd.sobel(ref_img, 0, mode='nearest'),
+            nd.sobel(ref_img, 1, mode='nearest')
+        )
+
     # Convert both images to [0,255) grayscale
     src_img = img
     if percentile_min <= 0 and percentile_max >= 100:
@@ -360,16 +370,6 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
         dst_img = np.ma.masked_invalid(dst_img)
     dst_img = (np.clip((dst_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
         .astype(np.uint8)
-
-    if detect_edges:
-        img = np.hypot(
-            nd.sobel(img, 0, mode='nearest'),
-            nd.sobel(img, 1, mode='nearest')
-        )
-        ref_img = np.hypot(
-            nd.sobel(ref_img, 0, mode='nearest'),
-            nd.sobel(ref_img, 1, mode='nearest')
-        )
 
     # Extract features
     if algorithm == 'AKAZE':
