@@ -33,7 +33,13 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
     """
     if isinstance(f, pyfits.HDUList):
         if start or end:
-            data = f[hdu_no].section[start:end]
+            if start:
+                if end:
+                    data = f[hdu_no].section[start:end]
+                else:
+                    data = f[hdu_no].section[start:]
+            else:
+                data = f[hdu_no].section[:end]
         else:
             data = f[hdu_no].data
     else:
