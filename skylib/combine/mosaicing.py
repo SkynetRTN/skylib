@@ -320,12 +320,20 @@ def get_equalization_transforms(
                 for j, (_, _, d1, d2) in overlaps_for_file.items():
                     jc = param_offset[j]
                     npoints = len(d1)
-                    if use_sparse:
-                        a_gen.setdefault(ic, []).append((row, d2))
-                        a_gen.setdefault(jc, []).append((row, -d1))
+                    if i:
+                        if use_sparse:
+                            a_gen.setdefault(ic, []).append((row, d2))
+                            a_gen.setdefault(jc, []).append((row, -d1))
+                        else:
+                            a_lsq[row:row+npoints, ic] = d2
+                            a_lsq[row:row+npoints, jc] = -d1
                     else:
-                        a_lsq[row:row+npoints, ic] = d2
-                        a_lsq[row:row+npoints, jc] = -d1
+                        if use_sparse:
+                            a_gen.setdefault(jc, []).append(
+                                (row, np.ones(npoints)))
+                        else:
+                            a_lsq[row:row+npoints, jc] = 1
+                        b_lsq[row:row+npoints] = d2/d1
                     row += npoints
 
                 if callback is not None:
