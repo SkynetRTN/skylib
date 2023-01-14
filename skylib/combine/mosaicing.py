@@ -12,6 +12,7 @@ from scipy.sparse import csc_array
 from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
+from ..util.stats import chauvenet
 from .util import get_data
 
 
@@ -296,45 +297,45 @@ def get_equalization_transforms(
         if equalize_multiplicative:
             # Step 4: find the multiplicative pixel value transformations;
             # similar to additive with one model parameter: I = cs, which leads
-            # to least-squares system c_i I_j - c_j I_i = 0 for N parameters
-            # c_i
-            n = len(images_with_overlaps)
+            # to least-squares system c_i I_j - c_j I_i = 0 (i != 0),
+            # c_j = I_j/I_0, c_0 = 1 for N parameters c_i
+            n = len(images_with_overlaps) - 1
+            # noinspection PyUnboundLocalVariable
+            m = sum(len(overlaps_for_file)
+                    for overlaps_for_file in overlaps.values())
             param_offset = {}
             ofs = 0
             for i in images_with_overlaps:
-                param_offset[i] = ofs
-                ofs += 1
+                if i:
+                    param_offset[i] = ofs
+                    ofs += 1
 
             # Build the least-squares matrices
-            use_sparse = m*n*8 > max_mem_mb*(1 << 20)
-            a_gen = {}
-            if use_sparse:
-                a_lsq = None
-            else:
-                a_lsq = np.zeros((m, n))
+            a_lsq = np.zeros((m, n))
             b_lsq = np.zeros(m)
             row = 0
             # noinspection PyUnboundLocalVariable
             for i, overlaps_for_file in overlaps.items():
-                ic = param_offset[i]
+                if i:
+                    ic = param_offset[i]
+                else:
+                    ic = -1
                 for j, (_, _, d1, d2) in overlaps_for_file.items():
                     jc = param_offset[j]
-                    npoints = len(d1)
                     if i:
-                        if use_sparse:
-                            a_gen.setdefault(ic, []).append((row, d2))
-                            a_gen.setdefault(jc, []).append((row, -d1))
-                        else:
-                            a_lsq[row:row+npoints, ic] = d2
-                            a_lsq[row:row+npoints, jc] = -d1
+                        good = (~chauvenet(d2 - d1)).nonzero()
+                        d1 = d1[good].mean()
+                        d2 = d2[good].mean()
+                        a_lsq[row, ic] = d2
+                        a_lsq[row, jc] = -d1
                     else:
-                        if use_sparse:
-                            a_gen.setdefault(jc, []).append(
-                                (row, np.ones(npoints)))
-                        else:
-                            a_lsq[row:row+npoints, jc] = 1
-                        b_lsq[row:row+npoints] = d2/d1
-                    row += npoints
+                        a_lsq[row, jc] = 1
+                        good = (d1 != 0).nonzero()
+                        d1, d2 = d1[good], d2[good]
+                        d = d2/d1
+                        good = (~chauvenet(d)).nonzero()
+                        b_lsq[row] = d[good].mean()
+                    row += 1
 
                 if callback is not None:
                     callback(progress + (i + 1)/len(overlaps)*progress_step)
@@ -344,27 +345,8 @@ def get_equalization_transforms(
             gc.collect()
 
             # Compute the least-squares solution
-            if use_sparse:
-                # Reconstruct CSC representation
-                a_data, a_indices, a_indptr = [], [], [0]
-                for j in sorted(a_gen):
-                    nonempty_rows = 0
-                    for i, d in a_gen[j]:
-                        npoints = len(d)
-                        a_data.append(d)
-                        a_indices.append(np.arange(i, i + npoints))
-                        nonempty_rows += npoints
-                    a_indptr.append(a_indptr[-1] + nonempty_rows)
-                del a_gen
-                # noinspection PyTypeChecker
-                params = sparse_lstsq(
-                    csc_array((np.hstack(a_data), np.hstack(a_indices),
-                               np.array(a_indptr)), shape=(m, n)), b_lsq)[0]
-                del a_data, a_indices, a_indptr, b_lsq
-            else:
-                params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-                del a_lsq, b_lsq
-            gc.collect()
+            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
+
             if equalize_additive:
                 for i, ofs in param_offset.items():
                     # Append to additive transformation parameters
