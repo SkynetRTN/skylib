@@ -265,9 +265,7 @@ def get_equalization_transforms(
             row = 0
             # noinspection PyUnboundLocalVariable
             for i, overlaps_for_file in overlaps.items():
-                ic = param_offset[i]
                 for j, (x, y, d1, d2) in overlaps_for_file.items():
-                    jc = param_offset[j]
                     npoints = len(x)
 
                     # Compute all required powers of x and y
@@ -296,20 +294,37 @@ def get_equalization_transforms(
                             if use_sparse:
                                 if np.isscalar(col):
                                     col = np.full(npoints, col)
-                                a_gen.setdefault(ic + pofs, []) \
+                                a_gen.setdefault(param_offset[i] + pofs, []) \
                                     .append((row, col))
-                                a_gen.setdefault(jc + pofs, []) \
+                                a_gen.setdefault(param_offset[j] + pofs, []) \
                                     .append((row, -col))
                             else:
-                                a_lsq[row:row+npoints, ic+pofs] = col
-                                a_lsq[row:row+npoints, jc+pofs] = -col
+                                a_lsq[row:row+npoints,
+                                      param_offset[i]+pofs] = col
+                                a_lsq[row:row+npoints,
+                                      param_offset[j]+pofs] = -col
                             pofs += 1
                             del col
 
                     del x_pow, y_pow
 
-                    b_lsq[row:row+npoints] = d2
-                    b_lsq[row:row+npoints] -= d1
+                    if equalize_multiplicative:
+                        # Apply the already calculated multiplicative model
+                        # corrections to overlap data
+                        if i:
+                            if j:
+                                b_lsq[row:row+npoints] = \
+                                    d2/transformations[j][0] - \
+                                    d1/transformations[i][0]
+                            else:
+                                b_lsq[row:row+npoints] = \
+                                    d2 - d1/transformations[i][0]
+                        else:
+                            b_lsq[row:row+npoints] = \
+                                d2/transformations[j][0] - d1
+                    else:
+                        b_lsq[row:row+npoints] = d2
+                        b_lsq[row:row+npoints] -= d1
                     row += npoints
 
                 if callback is not None:
