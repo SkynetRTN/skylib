@@ -8,7 +8,7 @@ modes with optional scaling and outlier rejection.
 import gc
 import os.path
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 from datetime import timedelta
 
 import numpy as np
@@ -36,9 +36,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 lo: Optional[float] = None, hi: Optional[float] = None,
                 equalize_additive: bool = False, equalize_order: int = 1,
                 equalize_multiplicative: bool = True,
+                multiplicative_percentile: float = 99.9,
                 equalize_global: bool = False,
                 max_mem_mb: float = 100.0,
-                callback: Optional[callable] = None) \
+                callback: Optional[Callable] = None) \
         -> Tuple[Union[np.ndarray, ma.MaskedArray], float]:
     """
     Combine the given HDUs from all input images; used by :func:`combine` to
@@ -48,6 +49,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     :return: image stack data and rejection percent
     """
     n = len(input_data)
+    progress_step /= (1 + int(equalize_additive or equalize_multiplicative) +
+                      int(bool(scaling)))
 
     k_ref, k, offsets, transformations = 1, [1]*n, [0]*n, {}
     if equalize_additive or equalize_multiplicative:
@@ -55,7 +58,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         transformations = get_equalization_transforms(
             hdu_no, progress, progress_step, data_width, data_height,
             input_data, equalize_additive, equalize_order,
-            equalize_multiplicative, max_mem_mb, callback)
+            equalize_multiplicative, multiplicative_percentile, max_mem_mb,
+            callback)
+        progress += progress_step
 
     if scaling:
         # Calculate offsets and scaling factors
@@ -103,7 +108,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
             gc.collect()
             if callback is not None:
-                callback(progress + (data_no + 1)/n/2*progress_step)
+                callback(progress + (data_no + 1)/n*progress_step)
+        progress += progress_step
 
         # Normalize to the first frame with positive average
         k_ref = k[0]
@@ -159,7 +165,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 data = datacube[i]
                 pofs = 0
                 if equalize_multiplicative and i:
-                    data *= coeffs[pofs]
+                    data /= coeffs[pofs]
                     pofs += 1
                 if equalize_additive:
                     for o in range(equalize_order + 1):
@@ -307,9 +313,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         if callback is not None:
             callback(
                 progress +
-                ((0.5 if scaling else 0) +
-                 min(chunk + chunksize, data_height)/data_height /
-                 (2 if scaling else 1))*progress_step)
+                min(chunk + chunksize, data_height)/data_height*progress_step)
+    progress += progress_step
 
     if len(chunks) > 1:
         res = ma.vstack(chunks)
@@ -340,6 +345,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
             hi: Optional[Union[bool, int, float]] = None,
             equalize_additive: bool = False, equalize_order: int = 0,
             equalize_multiplicative: bool = True,
+            multiplicative_percentile: float = 99.9,
             equalize_global: bool = False,
             smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
             callback: Optional[callable] = None) \
@@ -389,6 +395,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
     :param equalize_additive: enable additive equalization for mosaicing
     :param equalize_order: additive equalization polynomial order
     :param equalize_multiplicative: enable multiplicative mosaic equalization
+    :param multiplicative_percentile: calculate equalization scaling factors
+        by comparing pixels at this percentile
     :param equalize_global: enable additive background flattening using
         `equalize_order` model
     :param smart_stacking: enable smart stacking: automatically exclude those
@@ -464,7 +472,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             hdu_no, total_progress, progress_step, data_width, data_height,
             input_data, mode, scaling, rejection, min_keep, propagate_mask,
             percentile, lo, hi, equalize_additive, equalize_order,
-            equalize_multiplicative, equalize_global, max_mem_mb, callback)
+            equalize_multiplicative, multiplicative_percentile,
+            equalize_global, max_mem_mb, callback)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -486,8 +495,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
                     propagate_mask, percentile, lo, hi, equalize_additive,
-                    equalize_order, equalize_multiplicative, equalize_global,
-                    max_mem_mb, callback)
+                    equalize_order, equalize_multiplicative,
+                    multiplicative_percentile, equalize_global, max_mem_mb,
+                    callback)
                 total_progress += progress_step
                 new_score = score_func(new_res)
                 if new_score > score:

@@ -48,7 +48,8 @@ def get_equalization_transforms(
                                Tuple[Union[np.ndarray, ma.MaskedArray],
                                      pyfits.Header]]],
         equalize_additive: bool = False, equalize_order: int = 0,
-        equalize_multiplicative: bool = True, max_mem_mb: float = 100.0,
+        equalize_multiplicative: bool = True,
+        multiplicative_percentile: float = 99.9, max_mem_mb: float = 100.0,
         callback: Optional[Callable] = None) -> Dict[int, np.ndarray]:
     """
     Calculate tile equalization transformations that make the individual tile
@@ -65,6 +66,8 @@ def get_equalization_transforms(
     :param equalize_additive: enable additive equalization
     :param equalize_order: additive equalization polynomial order
     :param equalize_multiplicative: enable multiplicative equalization
+    :param multiplicative_percentile: calculate equalization scaling factors
+        by comparing pixels at this percentile
     :param max_mem_mb: approximate maximum amount of RAM in megabytes that
         the algorithm is allowed to use
     :param callback: optional progress update callable with signature
@@ -197,19 +200,17 @@ def get_equalization_transforms(
             row = 0
             # noinspection PyUnboundLocalVariable
             for i, overlaps_for_file in overlaps.items():
-                if i:
-                    ic = param_offset[i]
-                else:
-                    ic = -1
                 for j, (_, _, d1, d2) in overlaps_for_file.items():
-                    jc = param_offset[j]
                     if i:
-                        a_lsq[row, ic] = np.percentile(d2, 99.9)
-                        a_lsq[row, jc] = -np.percentile(d1, 99.9)
+                        a_lsq[row, param_offset[i]] = np.percentile(
+                            d2, multiplicative_percentile)
+                        a_lsq[row, param_offset[j]] = -np.percentile(
+                            d1, multiplicative_percentile)
                     else:
-                        a_lsq[row, jc] = 1
-                        b_lsq[row] = np.percentile(d2, 99.9) / \
-                            np.percentile(d1, 99.9)
+                        a_lsq[row, param_offset[j]] = np.percentile(
+                            d1, multiplicative_percentile)
+                        b_lsq[row] = np.percentile(
+                            d2, multiplicative_percentile)
                     row += 1
 
                 if callback is not None:
