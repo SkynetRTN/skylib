@@ -158,6 +158,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             for i, coeffs in transformations.items():
                 data = datacube[i]
                 pofs = 0
+                if equalize_multiplicative and i:
+                    data *= coeffs[pofs]
+                    pofs += 1
                 if equalize_additive:
                     for o in range(equalize_order + 1):
                         for xp in range(o, -1, -1):
@@ -173,9 +176,6 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                                     d = y_pow[yp]
                                 data += c*d
                             pofs += 1
-                if equalize_multiplicative and i:
-                    data /= coeffs[pofs]
-                    pofs += 1
             del x_pow, y_pow
             gc.collect()
 

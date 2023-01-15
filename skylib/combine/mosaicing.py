@@ -12,7 +12,6 @@ from scipy.sparse import csc_array
 from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
-from ..util.stats import chauvenet
 from .util import get_data
 
 
@@ -176,8 +175,58 @@ def get_equalization_transforms(
     progress += progress_step
 
     if overlaps:
+        if equalize_multiplicative:
+            # Step 3: find the multiplicative pixel value transformations;
+            # similar to additive with one model parameter: I = cs, which leads
+            # to least-squares system c_i I_j - c_j I_i = 0 (i != 0),
+            # c_j = I_j/I_0, c_0 = 1 for N parameters c_i
+            nn = len(images_with_overlaps) - 1
+            # noinspection PyUnboundLocalVariable
+            mm = sum(len(overlaps_for_file)
+                     for overlaps_for_file in overlaps.values())
+            param_offset = {}
+            ofs = 0
+            for i in images_with_overlaps:
+                if i:
+                    param_offset[i] = ofs
+                    ofs += 1
+
+            # Build the least-squares matrices
+            a_lsq = np.zeros((mm, nn))
+            b_lsq = np.zeros(mm)
+            row = 0
+            # noinspection PyUnboundLocalVariable
+            for i, overlaps_for_file in overlaps.items():
+                if i:
+                    ic = param_offset[i]
+                else:
+                    ic = -1
+                for j, (_, _, d1, d2) in overlaps_for_file.items():
+                    jc = param_offset[j]
+                    if i:
+                        a_lsq[row, ic] = np.percentile(d2, 99.9)
+                        a_lsq[row, jc] = -np.percentile(d1, 99.9)
+                    else:
+                        a_lsq[row, jc] = 1
+                        b_lsq[row] = np.percentile(d2, 99.9) / \
+                            np.percentile(d1, 99.9)
+                    row += 1
+
+                if callback is not None:
+                    callback(progress + (i + 1)/len(overlaps)*progress_step)
+            progress += progress_step
+
+            if not equalize_additive:
+                del overlaps
+            gc.collect()
+
+            # Compute the least-squares solution
+            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
+            for i, ofs in param_offset.items():
+                transformations[i] = params[ofs:ofs+1]
+
         if equalize_additive:
-            # Step 3: find the additive pixel value transformations for each
+            # Step 4: find the additive pixel value transformations for each
             # image that minimize the difference in the overlapping areas.
             # The model is I = p0 + p1*x + p2*y + p3*x^2 + p4*xy + p5*y^2 + s
             # (s is the true signal). As long as the transformations are linear
@@ -213,6 +262,7 @@ def get_equalization_transforms(
                 a_lsq = np.zeros((m, n))
             b_lsq = np.empty(m, float)
             row = 0
+            # noinspection PyUnboundLocalVariable
             for i, overlaps_for_file in overlaps.items():
                 ic = param_offset[i]
                 for j, (x, y, d1, d2) in overlaps_for_file.items():
@@ -265,8 +315,7 @@ def get_equalization_transforms(
                     callback(progress + (i + 1)/len(overlaps)*progress_step)
             progress += progress_step
 
-            if not equalize_multiplicative:
-                del overlaps
+            del overlaps
             gc.collect()
 
             # Compute the least-squares solution
@@ -291,70 +340,17 @@ def get_equalization_transforms(
                 params = lstsq(a_lsq, b_lsq, rcond=None)[0]
                 del a_lsq, b_lsq
             gc.collect()
-            for i, ofs in param_offset.items():
-                transformations[i] = params[ofs:ofs+npar]
-
-        if equalize_multiplicative:
-            # Step 4: find the multiplicative pixel value transformations;
-            # similar to additive with one model parameter: I = cs, which leads
-            # to least-squares system c_i I_j - c_j I_i = 0 (i != 0),
-            # c_j = I_j/I_0, c_0 = 1 for N parameters c_i
-            n = len(images_with_overlaps) - 1
-            # noinspection PyUnboundLocalVariable
-            m = sum(len(overlaps_for_file)
-                    for overlaps_for_file in overlaps.values())
-            param_offset = {}
-            ofs = 0
-            for i in images_with_overlaps:
-                if i:
-                    param_offset[i] = ofs
-                    ofs += 1
-
-            # Build the least-squares matrices
-            a_lsq = np.zeros((m, n))
-            b_lsq = np.zeros(m)
-            row = 0
-            # noinspection PyUnboundLocalVariable
-            for i, overlaps_for_file in overlaps.items():
-                if i:
-                    ic = param_offset[i]
-                else:
-                    ic = -1
-                for j, (_, _, d1, d2) in overlaps_for_file.items():
-                    jc = param_offset[j]
-                    if i:
-                        good = (~chauvenet(d2 - d1)).nonzero()
-                        d1 = d1[good].mean()
-                        d2 = d2[good].mean()
-                        a_lsq[row, ic] = d2
-                        a_lsq[row, jc] = -d1
-                    else:
-                        a_lsq[row, jc] = 1
-                        good = (d1 != 0).nonzero()
-                        d1, d2 = d1[good], d2[good]
-                        d = d2/d1
-                        good = (~chauvenet(d)).nonzero()
-                        b_lsq[row] = d[good].mean()
-                    row += 1
-
-                if callback is not None:
-                    callback(progress + (i + 1)/len(overlaps)*progress_step)
-            progress += progress_step
-
-            del overlaps
-            gc.collect()
-
-            # Compute the least-squares solution
-            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-
-            if equalize_additive:
+            if equalize_multiplicative:
                 for i, ofs in param_offset.items():
-                    # Append to additive transformation parameters
-                    transformations[i] = np.concatenate(
-                        [transformations[i], [params[ofs]]])
+                    # Append to multiplicative transformation parameters
+                    if i:
+                        transformations[i] = np.concatenate(
+                            [transformations[i], params[ofs:ofs+npar]])
+                    else:
+                        transformations[i] = params[ofs:ofs+npar]
             else:
                 for i, ofs in param_offset.items():
-                    transformations[i] = params[ofs:ofs+1]
+                    transformations[i] = params[ofs:ofs+npar]
 
     return transformations
 
