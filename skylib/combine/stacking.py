@@ -5,51 +5,24 @@ Image stacking.
 modes with optional scaling and outlier rejection.
 """
 
-from datetime import timedelta
+import gc
 import os.path
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
+from datetime import timedelta
 
 import numpy as np
 from numpy import ma
-from numpy.linalg import lstsq
-from scipy.sparse import csc_array
-from scipy.sparse.linalg import lsqr as sparse_lstsq
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
 from ..util.fits import get_fits_time
+from .mosaicing import get_equalization_transforms, global_equalize
 from .smart_stacking import smart_stacking_score
+from .util import get_data
 
 
 __all__ = ['combine']
-
-
-def _get_data(f: Union[pyfits.HDUList,
-                       Tuple[Union[np.ndarray, ma.MaskedArray],
-                             pyfits.Header]],
-              hdu_no: int) -> Union[np.ndarray, ma.MaskedArray]:
-    """
-    Return data array given input data item (either a FITS file or
-    an array+header); handles masks and NaNs
-
-    :param f: input data item, as passed to :func:`combine` as `input_data`
-    :param hdu_no: optional FITS HDU number if applicable
-
-    :return: data array (masked or unmasked)
-    """
-    if isinstance(f, pyfits.HDUList):
-        data = f[hdu_no].data
-    else:
-        data = f[0]
-    if data.dtype.kind != 'f':
-        data = data.astype(float)
-    nans = np.isnan(data)
-    if nans.any():
-        if not isinstance(data, ma.MaskedArray):
-            data = ma.masked_array(data, np.zeros_like(data, bool))
-        data.mask[nans] = True
-    return data
 
 
 def _do_combine(hdu_no: int, progress: float, progress_step: float,
@@ -61,8 +34,12 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 rejection: Optional[str] = None, min_keep: int = 2,
                 propagate_mask: bool = True, percentile: float = 50.0,
                 lo: Optional[float] = None, hi: Optional[float] = None,
-                equalize_order: int = 1, max_mem_mb: float = 100.0,
-                callback: Optional[callable] = None) \
+                equalize_additive: bool = False, equalize_order: int = 1,
+                equalize_multiplicative: bool = True,
+                multiplicative_percentile: float = 99.9,
+                equalize_global: bool = False,
+                max_mem_mb: float = 100.0,
+                callback: Optional[Callable] = None) \
         -> Tuple[Union[np.ndarray, ma.MaskedArray], float]:
     """
     Combine the given HDUs from all input images; used by :func:`combine` to
@@ -72,15 +49,23 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     :return: image stack data and rejection percent
     """
     n = len(input_data)
-    data_shape = ()
+    progress_step /= (1 + int(equalize_additive or equalize_multiplicative) +
+                      int(bool(scaling)))
 
-    # Calculate offsets and scaling factors
-    k_ref, k, offsets, intersections = 1, [1]*n, [0]*n, {}
+    k_ref, k, offsets, transformations = 1, [1]*n, [0]*n, {}
+    if equalize_additive or equalize_multiplicative:
+        # Equalize the common image parts; suitable for mosaicing
+        transformations = get_equalization_transforms(
+            hdu_no, progress, progress_step, data_width, data_height,
+            input_data, equalize_additive, equalize_order,
+            equalize_multiplicative, multiplicative_percentile, max_mem_mb,
+            callback)
+        progress += progress_step
+
     if scaling:
+        # Calculate offsets and scaling factors
         for data_no, f in enumerate(input_data):
-            data = _get_data(f, hdu_no)
-            if not data_shape:
-                data_shape = data.shape
+            data = get_data(f, hdu_no)
 
             if scaling == 'average':
                 avg = data.mean()
@@ -107,205 +92,38 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     (data - min_val).clip(0, 2*0x10000 - 1)
                     .astype(np.int32))) + min_val
 
-            elif scaling == 'equalize':
-                # Equalize the common image parts; suitable for mosaicing
-                avg = 0
-                # Identify all available intersections with the other images
-                intersections_for_file = {}
-                for other_data_no, other_f in enumerate(input_data):
-                    if other_data_no == data_no:
-                        continue
-                    other_data = _get_data(other_f, hdu_no)
-                    if isinstance(data, ma.MaskedArray):
-                        if isinstance(other_data, ma.MaskedArray):
-                            intersection = (~data.mask) & (~other_data.mask)
-                        else:
-                            intersection = ~data.mask
-                    elif isinstance(other_data, ma.MaskedArray):
-                        intersection = ~other_data.mask
-                    else:
-                        intersection = np.array(True)
-                    if not intersection.any():
-                        continue
-
-                    # Found an intersection; save its coordinates and original
-                    # pixel values for both intersecting images
-                    if intersection.shape:
-                        inters_y, inters_x = intersection.nonzero()
-                        inters_data1 = data[intersection]
-                        if isinstance(inters_data1, ma.MaskedArray):
-                            inters_data1 = inters_data1.data
-                        inters_data2 = other_data[intersection]
-                        if isinstance(inters_data2, ma.MaskedArray):
-                            inters_data2 = inters_data2.data
-                    else:
-                        inters_y, inters_x = np.indices(data_shape)
-                        if isinstance(data, ma.MaskedArray):
-                            inters_data1 = data.data
-                        else:
-                            inters_data1 = data
-                        if isinstance(other_data, ma.MaskedArray):
-                            inters_data2 = other_data.data
-                        else:
-                            inters_data2 = other_data
-                    intersections_for_file[other_data_no] = (
-                        inters_x.ravel(), inters_y.ravel(),
-                        inters_data2 - inters_data1)
-
-                if intersections_for_file:
-                    intersections[data_no] = intersections_for_file
-
             else:
                 raise ValueError(
                     'Unknown scaling mode "{}"'.format(scaling))
 
-            if scaling != 'equalize':
-                if avg > 0:
-                    ofs = 0
-                else:
-                    # To make sure that all images are scaled by a positive
-                    # factor, add a constant offset to the image so that its
-                    # average = 1
-                    ofs, avg = 1 - avg, 1
-                k[data_no] = avg
-                offsets[data_no] = ofs
+            if avg > 0:
+                ofs = 0
+            else:
+                # To make sure that all images are scaled by a positive
+                # factor, add a constant offset to the image so that its
+                # average = 1
+                ofs, avg = 1 - avg, 1
+            k[data_no] = avg
+            offsets[data_no] = ofs
 
+            gc.collect()
             if callback is not None:
-                callback(progress + (data_no + 1)/n/2*progress_step)
+                callback(progress + (data_no + 1)/n*progress_step)
+        progress += progress_step
 
-        if scaling != 'equalize':
-            # Normalize to the first frame with positive average
-            k_ref = k[0]
-            if k_ref == 1:
-                for ki in k[1:]:
-                    if ki != 1:
-                        k_ref = ki
-                        break
-
-    transformations = {}
-    if scaling == 'equalize' and intersections:
-        # In equalize mode, find the pixel value transformations for each image
-        # that minimize the difference in the areas of intersection. As long as
-        # the transformations are linear with respect to its parameters, this
-        # is a sparse linear least-squares problem AX = B with MxN coefficient
-        # matrix A, M-vector of observed differences B, and N-vector of
-        # parameters X; N = 3*(number of images that have intersections),
-        # M = (total number of intersecting points) = sum(M_k), where M_k is
-        # the number of points in k-th intersection, k = 1...K, K = (number of
-        # unique intersections).
-        npar = (equalize_order + 1)*(equalize_order + 2)//2
-        n = npar*len(intersections)
-        m = 0
-        skip = []
-        # Count each pair of intersecting images only once
-        for i, intersections_for_file in intersections.items():
-            for j, (_, _, d) in intersections_for_file.items():
-                if (i, j) in skip:
-                    continue
-                m += len(d)
-                skip.append((j, i))
-
-        # Since not all input images may have intersections, the offset of
-        # the triple of parameters (a, b, c) in the N-element vector of
-        # parameters X for i-th image is not simply 3i; build a mapping to
-        # easily calculate this offset
-        param_offset = {}
-        ofs = 0
-        for i in intersections.keys():
-            param_offset[i] = ofs
-            ofs += npar
-
-        # Build the least-squares matrices
-        use_sparse = m*n*8 > max_mem_mb*(1 << 20)
-        a_gen = {}  # only used if sparse
-        if use_sparse:
-            # Too much RAM for a regular array, use scipy.sparse; a_data[col]
-            # is a list of (row#, data) pairs representing vertical slices
-            a_lsq = None
-        else:
-            a_lsq = np.zeros((m, n))
-        b_lsq = np.empty(m, float)
-        skip = []
-        row = 0
-        for i, intersections_for_file in intersections.items():
-            ic = param_offset[i]
-            for j, (x, y, d) in intersections_for_file.items():
-                if (i, j) in skip:
-                    continue
-                jc = param_offset[j]
-                npoints = len(d)
-
-                # Compute all needed powers of x and y
-                x_pow, y_pow = [1], [1]
-                if equalize_order > 0:
-                    x_pow.append(x)
-                    y_pow.append(y)
-                    for p in range(equalize_order - 1):
-                        x_pow.append(x_pow[-1]*x)
-                        y_pow.append(y_pow[-1]*y)
-
-                # Set i-th column(s) in the following order: 1, x, y, x^2, xy,
-                # y^2, etc., and the same for j, but with the opposite sign
-                pofs = 0
-                for o in range(equalize_order + 1):
-                    for xp in range(o, -1, -1):
-                        yp = o - xp
-                        if xp:
-                            if yp:
-                                col = x_pow[xp]*y_pow[yp]
-                            else:
-                                col = x_pow[xp]
-                        else:
-                            col = y_pow[yp]
-                        if use_sparse:
-                            if np.isscalar(col):
-                                col = np.full(npoints, col)
-                            a_gen.setdefault(ic + pofs, []).append((row, col))
-                            a_gen.setdefault(jc + pofs, []).append((row, -col))
-                        else:
-                            a_lsq[row:row + npoints, ic + pofs] = col
-                            a_lsq[row:row + npoints, jc + pofs] = -col
-                        pofs += 1
-
-                b_lsq[row:row + npoints] = d
-                row += npoints
-                # Set coeffs for each pair of intersecting images only once;
-                # setting them twice would overwrite the same coeffs with
-                # the same values but the opposite sign, which will only slow
-                # things down but won't change the result
-                skip.append((j, i))
-
-        # Compute the least-squares solution
-        if use_sparse:
-            # Reconstruct CSC representation
-            a_data, a_indices, a_indptr = [], [], [0]
-            for j in sorted(a_gen):
-                nonempty_rows = 0
-                for i, d in a_gen[j]:
-                    npoints = len(d)
-                    a_data.append(d)
-                    a_indices.append(np.arange(i, i + npoints))
-                    nonempty_rows += npoints
-                a_indptr.append(a_indptr[-1] + nonempty_rows)
-            # noinspection PyTypeChecker
-            params = sparse_lstsq(
-                csc_array((np.hstack(a_data), np.hstack(a_indices),
-                           np.array(a_indptr)), shape=(m, n)), b_lsq)[0]
-        else:
-            params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-        for i, ofs in param_offset.items():
-            transformations[i] = params[ofs:ofs + npar]
+        # Normalize to the first frame with positive average
+        k_ref = k[0]
+        if k_ref == 1:
+            for ki in k[1:]:
+                if ki != 1:
+                    k_ref = ki
+                    break
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
-    rowsize = 0
-    for data in input_data:
-        if isinstance(data, pyfits.HDUList):
-            data = data[hdu_no].data
-        else:
-            data = data[0]
-        rowsize += data[0].nbytes
-        if rejection or isinstance(data, ma.MaskedArray):
-            rowsize += data_width
+    bytes_per_pixel = max(
+        abs((data[hdu_no].header if isinstance(data, pyfits.HDUList)
+             else data[1])['BITPIX'])//8 for data in input_data) + 1
+    rowsize = data_width*bytes_per_pixel*len(input_data)
     chunksize = min(max(int(max_mem_mb*(1 << 20)/rowsize), 1), data_height)
     while chunksize > 1:
         # Use as small chunks as possible but keep their total number
@@ -317,7 +135,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     rej_percent = 0
     for chunk in range(0, data_height, chunksize):
         datacube = [
-            _get_data(f, hdu_no).data[chunk:chunk + chunksize]
+            get_data(f, hdu_no, chunk, chunk + chunksize)
             for f in input_data
         ]
 
@@ -330,43 +148,42 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
         # Equalize backgrounds
         if transformations:
-            chunk_y, chunk_x = np.indices(datacube[0].shape)
-            chunk_y += chunk
-            x_pow, y_pow = [1], [1]
-            if equalize_order > 0:
-                x_pow.append(chunk_x)
-                y_pow.append(chunk_y)
-                for p in range(equalize_order - 1):
-                    x_pow.append(x_pow[-1]*chunk_x)
-                    y_pow.append(y_pow[-1]*chunk_y)
+            if equalize_additive:
+                chunk_y, chunk_x = np.indices(datacube[0].shape)
+                chunk_y += chunk
+                x_pow, y_pow = [1], [1]
+                if equalize_order > 0:
+                    x_pow.append(chunk_x)
+                    y_pow.append(chunk_y)
+                    for p in range(equalize_order - 1):
+                        x_pow.append(x_pow[-1]*chunk_x)
+                        y_pow.append(y_pow[-1]*chunk_y)
+                del chunk_x, chunk_y
+            else:
+                x_pow = y_pow = None
             for i, coeffs in transformations.items():
                 data = datacube[i]
                 pofs = 0
-                for o in range(equalize_order + 1):
-                    for xp in range(o, -1, -1):
-                        c = coeffs[pofs]
-                        if c:
-                            yp = o - xp
-                            if xp:
-                                if yp:
-                                    d = x_pow[xp]*y_pow[yp]
+                if equalize_multiplicative and i:
+                    data /= coeffs[pofs]
+                    pofs += 1
+                if equalize_additive:
+                    for o in range(equalize_order + 1):
+                        for xp in range(o, -1, -1):
+                            c = coeffs[pofs]
+                            if c:
+                                yp = o - xp
+                                if xp:
+                                    if yp:
+                                        d = x_pow[xp]*y_pow[yp]
+                                    else:
+                                        d = x_pow[xp]
                                 else:
-                                    d = x_pow[xp]
-                            else:
-                                d = y_pow[yp]
-                            data += c*d
-                        pofs += 1
-
-        # Convert NaNs to masked values
-        for i, data in enumerate(datacube):
-            if np.isnan(data).any():
-                if not isinstance(data, ma.MaskedArray):
-                    data = ma.masked_array(
-                        data, np.full(data.shape, False), fill_value=np.nan)
-                elif not data.mask.shape:
-                    data.mask = np.full(data.shape, data.mask)
-                data.mask[np.isnan(data)] = True
-                datacube[i] = data
+                                    d = y_pow[yp]
+                                data += c*d
+                            pofs += 1
+            del x_pow, y_pow
+            gc.collect()
 
         initial_mask = None
         if rejection or any(isinstance(data, ma.MaskedArray)
@@ -386,6 +203,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     initial_mask = None
         else:
             datacube = np.array(datacube)
+        gc.collect()
 
         if rejection in ('chauvenet', 'rcr'):
             if lo is None:
@@ -399,7 +217,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 mean_type = 'mean'
                 sigma_type = 'stddev'
             datacube.mask = chauvenet(
-                datacube,  min_vals=min_keep, mean=mean_type, sigma=sigma_type,
+                datacube, min_vals=min_keep, mean=mean_type, sigma=sigma_type,
                 clip_lo=lo, clip_hi=hi)
         elif rejection == 'iraf':
             if lo is None:
@@ -418,6 +236,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 for j in range(-hi, lo):
                     datacube.mask[(order[j].ravel(),) + mg] = True
                 del order, mg
+                gc.collect()
         elif rejection == 'minmax':
             if lo is not None and hi is not None:
                 if lo > hi:
@@ -449,6 +268,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                     del avg, sigma, resid, outliers
                     break
                 datacube.mask[outliers.nonzero()] = True
+            gc.collect()
         elif rejection:
             raise ValueError(
                 'Unknown rejection mode "{}"'.format(rejection))
@@ -493,9 +313,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         if callback is not None:
             callback(
                 progress +
-                ((0.5 if scaling else 0) +
-                 min(chunk + chunksize, data_height)/data_height /
-                 (2 if scaling else 1))*progress_step)
+                min(chunk + chunksize, data_height)/data_height*progress_step)
+    progress += progress_step
 
     if len(chunks) > 1:
         res = ma.vstack(chunks)
@@ -505,49 +324,13 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             res.mask is None or res.mask is False or not res.mask.any()):
         res = res.data
 
-    if transformations and equalize_order > 0:
+    if transformations and equalize_global and equalize_order > 0:
         # The background equalization least-squares system is degenerate
         # (the coefficient matrix rank is npar less than N (see above), so
         # in fact we have a family of least-squares solutions; choose one of
         # them that makes the resulting mosaic background as flat as possible
-        # by fitting the model in the entire mosaic
-        npar = (equalize_order + 1)*(equalize_order + 2)//2
-        y, x = np.indices(data_shape)
-        x, y, b_lsq = x.ravel(), y.ravel(), res.ravel()
-        x_pow, y_pow = [1, x], [1, y]
-        for p in range(equalize_order - 1):
-            x_pow.append(x_pow[-1]*x)
-            y_pow.append(y_pow[-1]*y)
-        a_lsq = np.empty((len(x), npar))
-        pofs = 0
-        for o in range(equalize_order + 1):
-            for xp in range(o, -1, -1):
-                yp = o - xp
-                if xp:
-                    if yp:
-                        col = x_pow[xp]*y_pow[yp]
-                    else:
-                        col = x_pow[xp]
-                else:
-                    col = y_pow[yp]
-                a_lsq[:, pofs] = col
-                pofs += 1
-        params = lstsq(a_lsq, b_lsq, rcond=None)[0]
-        pofs = 0
-        for o in range(equalize_order + 1):
-            for xp in range(o, -1, -1):
-                c = params[pofs]
-                if c:
-                    yp = o - xp
-                    if xp:
-                        if yp:
-                            col = x_pow[xp]*y_pow[yp]
-                        else:
-                            col = x_pow[xp]
-                    else:
-                        col = y_pow[yp]
-                    b_lsq -= c*col
-                pofs += 1
+        # by fitting the model to the entire mosaic
+        res = global_equalize(res, equalize_order)
 
     return res, rej_percent
 
@@ -560,8 +343,12 @@ def combine(input_data: List[Union[pyfits.HDUList,
             propagate_mask: bool = True, percentile: float = 50.0,
             lo: Optional[Union[bool, int, float]] = None,
             hi: Optional[Union[bool, int, float]] = None,
-            equalize_order: int = 1, smart_stacking: Optional[str] = None,
-            max_mem_mb: float = 100.0, callback: Optional[callable] = None) \
+            equalize_additive: bool = False, equalize_order: int = 0,
+            equalize_multiplicative: bool = True,
+            multiplicative_percentile: float = 99.9,
+            equalize_global: bool = False,
+            smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
+            callback: Optional[callable] = None) \
         -> List[Tuple[np.ndarray, pyfits.Header]]:
     """
     Combine a series of FITS images using the various stacking modes with
@@ -575,7 +362,7 @@ def combine(input_data: List[Union[pyfits.HDUList,
     :param scaling: scaling mode: None (default) - do not scale data,
         "average" - scale data to match average values, "percentile" - match
         the given percentile (median for `percentile` = 50), "mode" - match
-        modal values, "equalize" - match image backgrounds for mosaicing
+        modal values
     :param rejection: outlier rejection mode: None (default) - do not reject
         outliers, "chauvenet" - use classic Chauvenet rejection, "rcr" - use
         super-simplified Robust Chauvenet Rejection, "iraf" - IRAF-like
@@ -605,8 +392,13 @@ def combine(input_data: List[Union[pyfits.HDUList,
             above the baseline; default: 3
         `rejection` = "chauvenet" or "rcr": (bool) reject positive outliers;
             default: True
-    :param equalize_order: background equalization polynomial order; used with
-        `scaling` = "equalize"
+    :param equalize_additive: enable additive equalization for mosaicing
+    :param equalize_order: additive equalization polynomial order
+    :param equalize_multiplicative: enable multiplicative mosaic equalization
+    :param multiplicative_percentile: calculate equalization scaling factors
+        by comparing pixels at this percentile
+    :param equalize_global: enable additive background flattening using
+        `equalize_order` model
     :param smart_stacking: enable smart stacking: automatically exclude those
         images from the stack that will not improve its quality in a certain
         sense; currently supported modes:
@@ -663,10 +455,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
         data_width = data_height = 0
         for data in input_data:
             if isinstance(data, pyfits.HDUList):
-                data = data[hdu_no].data
+                hdr = data[hdu_no].header
             else:
-                data = data[0]
-            h, w = data.shape
+                hdr = data[1]
+            w, h = hdr['NAXIS1'], hdr['NAXIS2']
             if not data_width:
                 data_width, data_height = w, h
             elif (data_width, data_height) != (w, h):
@@ -679,7 +471,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
         res, rej_percent = _do_combine(
             hdu_no, total_progress, progress_step, data_width, data_height,
             input_data, mode, scaling, rejection, min_keep, propagate_mask,
-            percentile, lo, hi, equalize_order, max_mem_mb, callback)
+            percentile, lo, hi, equalize_additive, equalize_order,
+            equalize_multiplicative, multiplicative_percentile,
+            equalize_global, max_mem_mb, callback)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -700,8 +494,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 new_res, new_rej_percent = _do_combine(
                     hdu_no, total_progress, progress_step, data_width,
                     data_height, new_data, mode, scaling, rejection, min_keep,
-                    propagate_mask, percentile, lo, hi, equalize_order,
-                    max_mem_mb, callback)
+                    propagate_mask, percentile, lo, hi, equalize_additive,
+                    equalize_order, equalize_multiplicative,
+                    multiplicative_percentile, equalize_global, max_mem_mb,
+                    callback)
                 total_progress += progress_step
                 new_score = score_func(new_res)
                 if new_score > score:
