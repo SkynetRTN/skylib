@@ -269,6 +269,77 @@ def get_transform_wcs(src_wcs: WCS, dst_wcs: WCS,
         enable_skew=enable_skew)
 
 
+def _get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
+                        feature_cache: dict, algorithm: str = 'AKAZE',
+                        detect_edges: bool = False,
+                        percentile_min: float = 10,
+                        percentile_max: float = 99, **kwargs):
+    img_id = id(img)
+    try:
+        # Features already detected in the current image?
+        return feature_cache[img_id]
+    except KeyError:
+        pass
+
+    # Optional edge detection
+    if detect_edges:
+        img = np.hypot(
+            nd.sobel(img, 0, mode='nearest'),
+            nd.sobel(img, 1, mode='nearest')
+        )
+
+    # Convert to [0,255) grayscale
+    if percentile_min <= 0 and percentile_max >= 100:
+        mn, mx = img.min(), img.max()
+    elif percentile_min <= 0:
+        mn = img.min()
+        if isinstance(img, np.ma.MaskedArray):
+            mx = np.nanpercentile(img.filled(np.nan), percentile_max)
+        else:
+            mx = np.nanpercentile(img, percentile_max)
+    elif percentile_max >= 100:
+        if isinstance(img, np.ma.MaskedArray):
+            mn = np.nanpercentile(img.filled(np.nan), percentile_min)
+        else:
+            mn = np.nanpercentile(img, percentile_min)
+        mx = img.max()
+    else:
+        if isinstance(img, np.ma.MaskedArray):
+            mn, mx = np.nanpercentile(
+                img.filled(np.nan), [percentile_min, percentile_max])
+        else:
+            mn, mx = np.nanpercentile(img, [percentile_min, percentile_max])
+    if mn >= mx:
+        raise ValueError('Empty image')
+    if not isinstance(img, np.ma.MaskedArray):
+        img = np.ma.masked_invalid(img)
+    img = (np.clip((img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+        .astype(np.uint8)
+
+    # Extract features
+    if algorithm == 'AKAZE':
+        fe = cv.AKAZE_create(**kwargs)
+    elif algorithm == 'BRISK':
+        fe = cv.BRISK_create(**kwargs)
+    elif algorithm == 'KAZE':
+        fe = cv.KAZE_create(**kwargs)
+    elif algorithm == 'ORB':
+        fe = cv.ORB_create(**kwargs)
+    elif algorithm == 'SIFT':
+        fe = cv.SIFT_create(**kwargs)
+    elif algorithm == 'SURF':
+        fe = cv.xfeatures2d.SURF_create(**kwargs)
+    else:
+        raise ValueError(
+            'Unknown feature detection algorithm "{}"'.format(algorithm))
+
+    kp1, des1 = fe.detectAndCompute(img, None)
+
+    # Cache features found
+    feature_cache[img_id] = kp1, des1
+    return kp1, des1
+
+
 def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
                            ref_img: Union[np.ndarray, np.ma.MaskedArray],
                            enable_rot: bool = True,
@@ -279,6 +350,7 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
                            detect_edges: bool = False,
                            percentile_min: float = 10,
                            percentile_max: float = 99,
+                           feature_cache: dict = None,
                            **kwargs) \
         -> Tuple[Optional[np.ndarray], np.ndarray]:
     """
@@ -298,97 +370,23 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
     :param detect_edges: apply edge detection before feature extraction
     :param percentile_min: lower percentile for conversion to 8 bit
     :param percentile_max: upper percentile for conversion to 8 bit
+    :param feature_cache: optional cache containing features detected in all
+        images so far; initialize to empty dict before first call to
+        :func:`get_transform_features` if the same image is expected to be used
+        more than once
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: 2x2 linear transformation matrix and offset vector [dy, dx]
     """
-    if detect_edges:
-        img = np.hypot(
-            nd.sobel(img, 0, mode='nearest'),
-            nd.sobel(img, 1, mode='nearest')
-        )
-        ref_img = np.hypot(
-            nd.sobel(ref_img, 0, mode='nearest'),
-            nd.sobel(ref_img, 1, mode='nearest')
-        )
-
-    # Convert both images to [0,255) grayscale
-    src_img = img
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = src_img.min(), src_img.max()
-    elif percentile_min <= 0:
-        mn = src_img.min()
-        if isinstance(src_img, np.ma.MaskedArray):
-            mx = np.nanpercentile(src_img.filled(np.nan), percentile_max)
-        else:
-            mx = np.nanpercentile(src_img, percentile_max)
-    elif percentile_max >= 100:
-        if isinstance(src_img, np.ma.MaskedArray):
-            mn = np.nanpercentile(src_img.filled(np.nan), percentile_min)
-        else:
-            mn = np.nanpercentile(src_img, percentile_min)
-        mx = src_img.max()
-    else:
-        if isinstance(src_img, np.ma.MaskedArray):
-            mn, mx = np.nanpercentile(
-                src_img.filled(np.nan), [percentile_min, percentile_max])
-        else:
-            mn, mx = np.nanpercentile(
-                src_img, [percentile_min, percentile_max])
-    if mn >= mx:
-        raise ValueError('Empty image')
-    if not isinstance(src_img, np.ma.MaskedArray):
-        src_img = np.ma.masked_invalid(src_img)
-    src_img = (np.clip((src_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
-
-    dst_img = ref_img
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = dst_img.min(), dst_img.max()
-    elif percentile_min <= 0:
-        mn = dst_img.min()
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mx = np.nanpercentile(dst_img.filled(np.nan), percentile_max)
-        else:
-            mx = np.nanpercentile(dst_img, percentile_max)
-    elif percentile_max >= 100:
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mn = np.nanpercentile(dst_img.filled(np.nan), percentile_min)
-        else:
-            mn = np.nanpercentile(dst_img, percentile_min)
-        mx = dst_img.max()
-    else:
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mn, mx = np.nanpercentile(
-                dst_img.filled(np.nan), [percentile_min, percentile_max])
-        else:
-            mn, mx = np.nanpercentile(
-                dst_img, [percentile_min, percentile_max])
-    if mn >= mx:
-        raise ValueError('Empty reference image')
-    if not isinstance(dst_img, np.ma.MaskedArray):
-        dst_img = np.ma.masked_invalid(dst_img)
-    dst_img = (np.clip((dst_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
-
-    # Extract features
-    if algorithm == 'AKAZE':
-        fe = cv.AKAZE_create(**kwargs)
-    elif algorithm == 'BRISK':
-        fe = cv.BRISK_create(**kwargs)
-    elif algorithm == 'KAZE':
-        fe = cv.KAZE_create(**kwargs)
-    elif algorithm == 'ORB':
-        fe = cv.ORB_create(**kwargs)
-    elif algorithm == 'SIFT':
-        fe = cv.SIFT_create(**kwargs)
-    elif algorithm == 'SURF':
-        fe = cv.xfeatures2d.SURF_create(**kwargs)
-    else:
-        raise ValueError(
-            'Unknown feature detection algorithm "{}"'.format(algorithm))
-    kp1, des1 = fe.detectAndCompute(src_img, None)
-    kp2, des2 = fe.detectAndCompute(dst_img, None)
+    # Detect features or get from cache if already processed
+    if feature_cache is None:
+        feature_cache = {}
+    kp1, des1 = _get_image_features(
+        img, feature_cache, algorithm, detect_edges, percentile_min,
+        percentile_max, **kwargs)
+    kp2, des2 = _get_image_features(
+        ref_img, feature_cache, algorithm, detect_edges, percentile_min,
+        percentile_max, **kwargs)
 
     # Cross-match features
     matcher = cv.BFMatcher(
