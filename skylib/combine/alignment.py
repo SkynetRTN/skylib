@@ -6,7 +6,7 @@ Image alignment.
 1, 2, or more stars.
 """
 
-from typing import List as TList, Optional, Tuple, Union
+from typing import List as TList, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import scipy.ndimage as nd
@@ -15,8 +15,8 @@ import cv2 as cv
 
 
 __all__ = [
-    'get_transform_stars', 'get_transform_wcs', 'get_transform_features',
-    'get_transform_pixel', 'apply_transform',
+    'get_transform_stars', 'get_transform_wcs', 'get_image_features',
+    'get_transform_features', 'get_transform_pixel', 'apply_transform',
 ]
 
 
@@ -269,18 +269,27 @@ def get_transform_wcs(src_wcs: WCS, dst_wcs: WCS,
         enable_skew=enable_skew)
 
 
-def _get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
-                        feature_cache: dict, algorithm: str = 'AKAZE',
-                        detect_edges: bool = False,
-                        percentile_min: float = 10,
-                        percentile_max: float = 99, **kwargs):
-    img_id = id(img)
-    try:
-        # Features already detected in the current image?
-        return feature_cache[img_id]
-    except KeyError:
-        pass
+def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
+                       algorithm: str = 'AKAZE',
+                       detect_edges: bool = False,
+                       percentile_min: float = 10,
+                       percentile_max: float = 99, **kwargs) \
+        -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
+    """
+    Extract image features; results are used by :func:`get_transform_features`
 
+    :param img: input image
+    :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK",
+        "KAZE", "ORB", "SIFT"; more are available if OpenCV contribution
+        modules are installed: "SURF" (patented, not always available);
+        for more info, see OpenCV docs
+    :param detect_edges: apply edge detection before feature extraction
+    :param percentile_min: lower percentile for conversion to 8 bit
+    :param percentile_max: upper percentile for conversion to 8 bit
+    :param kwargs: extra feature detector-specific keyword arguments
+
+    :return: feature keypoints and descriptors
+    """
     # Optional edge detection
     if detect_edges:
         img = np.hypot(
@@ -333,31 +342,28 @@ def _get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
         raise ValueError(
             'Unknown feature detection algorithm "{}"'.format(algorithm))
 
-    kp1, des1 = fe.detectAndCompute(img, None)
-
-    # Cache features found
-    feature_cache[img_id] = kp1, des1
-    return kp1, des1
+    # Detect and return features
+    return fe.detectAndCompute(img, None)
 
 
-def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
-                           ref_img: Union[np.ndarray, np.ma.MaskedArray],
+def get_transform_features(kp1: Sequence[cv.KeyPoint], des1: np.ndarray,
+                           kp2: Sequence[cv.KeyPoint], des2: np.ndarray,
                            enable_rot: bool = True,
                            enable_scale: bool = True,
                            enable_skew: bool = True,
                            algorithm: str = 'AKAZE',
                            ratio_threshold: float = 0.7,
-                           detect_edges: bool = False,
-                           percentile_min: float = 10,
-                           percentile_max: float = 99,
-                           feature_cache: dict = None,
                            **kwargs) \
         -> Tuple[Optional[np.ndarray], np.ndarray]:
     """
     Calculate the alignment transformation based on feature similarity
 
-    :param img: input image as 2D NumPy array
-    :param ref_img: reference image
+    :param kp1: input image keypoints, as returned by
+        :func:`get_image_features`
+    :param des1: input image descriptors, as returned by
+        :func:`get_image_features`
+    :param kp2: reference image keypoints
+    :param des2: reference image descriptors
     :param enable_rot: allow rotation transformation for >= 2 points
     :param enable_scale: allow scaling transformation for >= 2 points
     :param enable_skew: allow skew transformation for >= 2 points; ignored
@@ -367,27 +373,10 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
         modules are installed: "SURF" (patented, not always available);
         for more info, see OpenCV docs
     :param ratio_threshold: Lowe's feature match test factor
-    :param detect_edges: apply edge detection before feature extraction
-    :param percentile_min: lower percentile for conversion to 8 bit
-    :param percentile_max: upper percentile for conversion to 8 bit
-    :param feature_cache: optional cache containing features detected in all
-        images so far; initialize to empty dict before first call to
-        :func:`get_transform_features` if the same image is expected to be used
-        more than once
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: 2x2 linear transformation matrix and offset vector [dy, dx]
     """
-    # Detect features or get from cache if already processed
-    if feature_cache is None:
-        feature_cache = {}
-    kp1, des1 = _get_image_features(
-        img, feature_cache, algorithm, detect_edges, percentile_min,
-        percentile_max, **kwargs)
-    kp2, des2 = _get_image_features(
-        ref_img, feature_cache, algorithm, detect_edges, percentile_min,
-        percentile_max, **kwargs)
-
     # Cross-match features
     matcher = cv.BFMatcher(
         cv.NORM_L2 if algorithm in ('KAZE', 'SIFT', 'SURF')
