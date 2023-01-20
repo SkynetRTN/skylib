@@ -33,7 +33,12 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
     """
     if isinstance(f, pyfits.HDUList):
         if start or end:
-            data = f[hdu_no].section[start:end]
+            if f[hdu_no].header.get('BSCALE', 1) != 1 or \
+                    f[hdu_no].header.get('BZERO'):
+                # Astropy bug handling sections for scaled data
+                data = f[hdu_no].data[start:end]
+            else:
+                data = f[hdu_no].section[start:end]
         else:
             data = f[hdu_no].data
     else:

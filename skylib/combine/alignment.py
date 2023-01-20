@@ -6,7 +6,7 @@ Image alignment.
 1, 2, or more stars.
 """
 
-from typing import List as TList, Optional, Tuple, Union
+from typing import List as TList, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import scipy.ndimage as nd
@@ -15,8 +15,8 @@ import cv2 as cv
 
 
 __all__ = [
-    'get_transform_stars', 'get_transform_wcs', 'get_transform_features',
-    'get_transform_pixel', 'apply_transform',
+    'get_transform_stars', 'get_transform_wcs', 'get_image_features',
+    'get_transform_features', 'get_transform_pixel', 'apply_transform',
 ]
 
 
@@ -269,106 +269,60 @@ def get_transform_wcs(src_wcs: WCS, dst_wcs: WCS,
         enable_skew=enable_skew)
 
 
-def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
-                           ref_img: Union[np.ndarray, np.ma.MaskedArray],
-                           enable_rot: bool = True,
-                           enable_scale: bool = True,
-                           enable_skew: bool = True,
-                           algorithm: str = 'AKAZE',
-                           ratio_threshold: float = 0.7,
-                           detect_edges: bool = False,
-                           percentile_min: float = 10,
-                           percentile_max: float = 99,
-                           **kwargs) \
-        -> Tuple[Optional[np.ndarray], np.ndarray]:
+def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
+                       algorithm: str = 'AKAZE',
+                       detect_edges: bool = False,
+                       percentile_min: float = 10,
+                       percentile_max: float = 99, **kwargs) \
+        -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
     """
-    Calculate the alignment transformation based on feature similarity
+    Extract image features; results are used by :func:`get_transform_features`
 
-    :param img: input image as 2D NumPy array
-    :param ref_img: reference image
-    :param enable_rot: allow rotation transformation for >= 2 points
-    :param enable_scale: allow scaling transformation for >= 2 points
-    :param enable_skew: allow skew transformation for >= 2 points; ignored
-        and set to False if `enable_rot`=False or `enable_scale`=False
+    :param img: input image
     :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK",
         "KAZE", "ORB", "SIFT"; more are available if OpenCV contribution
         modules are installed: "SURF" (patented, not always available);
         for more info, see OpenCV docs
-    :param ratio_threshold: Lowe's feature match test factor
     :param detect_edges: apply edge detection before feature extraction
     :param percentile_min: lower percentile for conversion to 8 bit
     :param percentile_max: upper percentile for conversion to 8 bit
     :param kwargs: extra feature detector-specific keyword arguments
 
-    :return: 2x2 linear transformation matrix and offset vector [dy, dx]
+    :return: feature keypoints and descriptors
     """
+    # Optional edge detection
     if detect_edges:
         img = np.hypot(
             nd.sobel(img, 0, mode='nearest'),
             nd.sobel(img, 1, mode='nearest')
         )
-        ref_img = np.hypot(
-            nd.sobel(ref_img, 0, mode='nearest'),
-            nd.sobel(ref_img, 1, mode='nearest')
-        )
 
-    # Convert both images to [0,255) grayscale
-    src_img = img
+    # Convert to [0,255) grayscale
     if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = src_img.min(), src_img.max()
+        mn, mx = img.min(), img.max()
     elif percentile_min <= 0:
-        mn = src_img.min()
-        if isinstance(src_img, np.ma.MaskedArray):
-            mx = np.nanpercentile(src_img.filled(np.nan), percentile_max)
+        mn = img.min()
+        if isinstance(img, np.ma.MaskedArray):
+            mx = np.nanpercentile(img.filled(np.nan), percentile_max)
         else:
-            mx = np.nanpercentile(src_img, percentile_max)
+            mx = np.nanpercentile(img, percentile_max)
     elif percentile_max >= 100:
-        if isinstance(src_img, np.ma.MaskedArray):
-            mn = np.nanpercentile(src_img.filled(np.nan), percentile_min)
+        if isinstance(img, np.ma.MaskedArray):
+            mn = np.nanpercentile(img.filled(np.nan), percentile_min)
         else:
-            mn = np.nanpercentile(src_img, percentile_min)
-        mx = src_img.max()
+            mn = np.nanpercentile(img, percentile_min)
+        mx = img.max()
     else:
-        if isinstance(src_img, np.ma.MaskedArray):
+        if isinstance(img, np.ma.MaskedArray):
             mn, mx = np.nanpercentile(
-                src_img.filled(np.nan), [percentile_min, percentile_max])
+                img.filled(np.nan), [percentile_min, percentile_max])
         else:
-            mn, mx = np.nanpercentile(
-                src_img, [percentile_min, percentile_max])
+            mn, mx = np.nanpercentile(img, [percentile_min, percentile_max])
     if mn >= mx:
         raise ValueError('Empty image')
-    if not isinstance(src_img, np.ma.MaskedArray):
-        src_img = np.ma.masked_invalid(src_img)
-    src_img = (np.clip((src_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
-
-    dst_img = ref_img
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = dst_img.min(), dst_img.max()
-    elif percentile_min <= 0:
-        mn = dst_img.min()
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mx = np.nanpercentile(dst_img.filled(np.nan), percentile_max)
-        else:
-            mx = np.nanpercentile(dst_img, percentile_max)
-    elif percentile_max >= 100:
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mn = np.nanpercentile(dst_img.filled(np.nan), percentile_min)
-        else:
-            mn = np.nanpercentile(dst_img, percentile_min)
-        mx = dst_img.max()
-    else:
-        if isinstance(dst_img, np.ma.MaskedArray):
-            mn, mx = np.nanpercentile(
-                dst_img.filled(np.nan), [percentile_min, percentile_max])
-        else:
-            mn, mx = np.nanpercentile(
-                dst_img, [percentile_min, percentile_max])
-    if mn >= mx:
-        raise ValueError('Empty reference image')
-    if not isinstance(dst_img, np.ma.MaskedArray):
-        dst_img = np.ma.masked_invalid(dst_img)
-    dst_img = (np.clip((dst_img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+    if not isinstance(img, np.ma.MaskedArray):
+        img = np.ma.masked_invalid(img)
+    img = (np.clip((img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
         .astype(np.uint8)
 
     # Extract features
@@ -387,9 +341,42 @@ def get_transform_features(img: Union[np.ndarray, np.ma.MaskedArray],
     else:
         raise ValueError(
             'Unknown feature detection algorithm "{}"'.format(algorithm))
-    kp1, des1 = fe.detectAndCompute(src_img, None)
-    kp2, des2 = fe.detectAndCompute(dst_img, None)
 
+    # Detect and return features
+    return fe.detectAndCompute(img, None)
+
+
+def get_transform_features(kp1: Sequence[cv.KeyPoint], des1: np.ndarray,
+                           kp2: Sequence[cv.KeyPoint], des2: np.ndarray,
+                           enable_rot: bool = True,
+                           enable_scale: bool = True,
+                           enable_skew: bool = True,
+                           algorithm: str = 'AKAZE',
+                           ratio_threshold: float = 0.7,
+                           **kwargs) \
+        -> Tuple[Optional[np.ndarray], np.ndarray]:
+    """
+    Calculate the alignment transformation based on feature similarity
+
+    :param kp1: input image keypoints, as returned by
+        :func:`get_image_features`
+    :param des1: input image descriptors, as returned by
+        :func:`get_image_features`
+    :param kp2: reference image keypoints
+    :param des2: reference image descriptors
+    :param enable_rot: allow rotation transformation for >= 2 points
+    :param enable_scale: allow scaling transformation for >= 2 points
+    :param enable_skew: allow skew transformation for >= 2 points; ignored
+        and set to False if `enable_rot`=False or `enable_scale`=False
+    :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK",
+        "KAZE", "ORB", "SIFT"; more are available if OpenCV contribution
+        modules are installed: "SURF" (patented, not always available);
+        for more info, see OpenCV docs
+    :param ratio_threshold: Lowe's feature match test factor
+    :param kwargs: extra feature detector-specific keyword arguments
+
+    :return: 2x2 linear transformation matrix and offset vector [dy, dx]
+    """
     # Cross-match features
     matcher = cv.BFMatcher(
         cv.NORM_L2 if algorithm in ('KAZE', 'SIFT', 'SURF')
