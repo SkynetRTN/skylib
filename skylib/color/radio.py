@@ -16,8 +16,10 @@ def radio_nat(img_r, img_g, img_b, fcal_r, fcal_g, fcal_b, ftrue_r, ftrue_g,
     img_b = img_b.astype(float)
 
     # Transform G first
-    fg = img_g + floor
-    img_g *= fcal_g/ftrue_g
+    if floor:
+        fg = img_g + floor
+    else:
+        fg = img_g.copy()
 
     # Transform R and B
     for img, fcal, ftrue, nu, lam in [
@@ -39,5 +41,8 @@ def radio_nat(img_r, img_g, img_b, fcal_r, fcal_g, fcal_b, ftrue_r, ftrue_g,
         good = ((img > 0) & (fg > 0)).nonzero()
         img[good] = (fg*(lambda_g/lam)**a)[good]
         img -= floor
+
+    for img in (img_r, img_g, img_b):
+        img *= ftrue_g/fcal_g
 
     return img_r, img_g, img_b
