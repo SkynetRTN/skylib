@@ -109,13 +109,13 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     :param k: automatic aperture radius in units of isophotal radius; 0 means
         find the optimal radius based on SNR; default: 0
     :param k_in: inner annulus radius in units of aperture radius (fixed
-        aperture, i.e. `a` is provided) or isophotal radius (adaptive aperture);
-        default: 1.5*`k` or 3.75 if `k` is undefined and `a` = None
+        aperture, i.e. `a` is provided) or isophotal radius (adaptive
+        aperture); default: 1.5*`k` or 3.75 if `k` is undefined and `a` = None
     :param k_out: outer annulus radius in units of aperture radius (fixed
         aperture) or isophotal radius (adaptive aperture); default: 2*`k` or
         5 if `k` is undefined and `a` = None
-    :param radius: isophotal analysis radius in pixels used to compute automatic
-        aperture if ellipse parameters (a,b,theta) are missing
+    :param radius: isophotal analysis radius in pixels used to compute
+        automatic aperture if ellipse parameters (a,b,theta) are missing
     :param fix_aper: use the same aperture radius for all sources when doing
         automatic photometry; calculated as flux-weighted median of aperture
         sizes based on isophotal parameters
@@ -129,10 +129,10 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         0 = disable aperture correction
 
     :return: record array containing the input sources, with the following
-        fields added or updated: "flux", "flux_err", "mag", "mag_err", "aper_a",
-        "aper_b", "aper_theta", "aper_a_in", "aper_a_out", "aper_b_out",
-        "aper_theta_out", "aper_area", "background_area", "background",
-        "background_rms", "phot_flag"
+        fields added or updated: "flux", "flux_err", "mag", "mag_err",
+        "aper_a", "aper_b", "aper_theta", "aper_a_in", "aper_a_out",
+        "aper_b_out", "aper_theta_out", "aper_area", "background_area",
+        "background", "background_rms", "phot_flag"
     """
     if not len(sources):
         return array([])
@@ -291,8 +291,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                     # noinspection PyTypeChecker
                     res = minimize(
                         calc_flux_err, [a[i]*1.6],
-                        (img_back, x[i], y[i], elongation[i], theta[i], tmp_rms,
-                         mask, gain), bounds=[(1, None)], tol=1e-5)
+                        (img_back, x[i], y[i], elongation[i], theta[i],
+                         tmp_rms, mask, gain), bounds=[(1, None)], tol=1e-5)
                 except ValueError:
                     continue
                 if not res.success:
@@ -340,29 +340,26 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     if have_background:
         if fixed_aper and a == b:
             bk_area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
-            bk_mean, bk_sigma = sep.sum_circle(
-                background, x, y, a, err=1, mask=mask, subpix=0)[:2]
+            bk_flux = sep.sum_circle(
+                background, x, y, a, err=1, mask=mask, subpix=0)[0]
         else:
             bk_area = sep.sum_ellipse(
                 area_img, x, y, a, b, theta, 1, mask=mask, subpix=0)[0]
-            bk_mean, bk_sigma = sep.sum_ellipse(
+            bk_flux = sep.sum_ellipse(
                 background, x, y, a, b, theta, 1, err=1, mask=mask,
-                subpix=0)[:2]
-        error = background_rms
+                subpix=0)[0]
     elif fixed_aper and a_out == b_out:
         bk_area = sep.sum_circann(
             area_img, x, y, a_in, a_out, mask=mask, subpix=0)[0]
-        bk_mean, bk_sigma = sep.sum_circann(
-            img, x, y, a_in, a_out, err=1, mask=mask, subpix=0)[:2]
-        error = bk_sigma
+        bk_flux = sep.sum_circann(
+            img, x, y, a_in, a_out, mask=mask, subpix=0)[0]
     else:
         bk_area = sep.sum_ellipann(
             area_img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, mask=mask,
             subpix=0)[0]
-        bk_mean, bk_sigma = sep.sum_ellipann(
-            img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, err=1, mask=mask,
-            subpix=0)[:2]
-        error = bk_sigma
+        bk_flux = sep.sum_ellipann(
+            img, x, y, a_out, b_out, theta_out, a_in/a_out, 1, mask=mask,
+            subpix=0)[0]
 
     if have_background:
         area = bk_area
@@ -374,20 +371,31 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
 
     if fixed_aper and a == b:
         # Fixed circular aperture
-        if ndim(error) == 1:
+        if ndim(x) == 1:
             # Separate scalar error for each source
             flux, flux_err = empty([2, len(sources)], dtype=float)
             flags = empty(len(sources), dtype=int)
-            for i, (_x, _y, _err) in enumerate(zip(x, y, error)):
-                flux[i], flux_err[i], flags[i] = sep.sum_circle(
-                    img, [_x], [_y], a, err=_err, mask=mask, gain=gain,
-                    subpix=0)
+            if have_background:
+                for i, (_x_, _y_) in enumerate(zip(x, y)):
+                    flux[i], flux_err[i], flags[i] = sep.sum_circle(
+                        img, [_x_], [_y_], a, err=background_rms, mask=mask,
+                        gain=gain, subpix=0)
+            else:
+                for i, (_x_, _y_) in enumerate(zip(x, y)):
+                    flux[i], flux_err[i], flags[i] = sep.sum_circle(
+                        img, [_x_], [_y_], a, mask=mask, bkgann=(a_in, a_out),
+                        gain=gain, subpix=0)
+        elif have_background:
+            flux, flux_err, flags = sep.sum_circle(
+                img, x, y, a, err=background_rms, mask=mask, gain=gain,
+                subpix=0)
         else:
             flux, flux_err, flags = sep.sum_circle(
-                img, x, y, a, err=error, mask=mask, gain=gain, subpix=0)
+                img, x, y, a, mask=mask, bkgann=(a_in, a_out), gain=gain,
+                subpix=0)
     else:
         # Variable or elliptic aperture
-        if ndim(error) == 1:
+        if ndim(x) == 1:
             # Separate scalar error for each source
             flux, flux_err = empty([2, len(sources)], dtype=float)
             flags = empty(len(sources), dtype=int)
@@ -397,31 +405,39 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 b = full_like(x, b)
             if isscalar(theta):
                 theta = full_like(x, theta)
-            for i, (_x, _y, _err, _a, _b, _theta) in enumerate(zip(
-                    x, y, error, a, b, theta)):
-                flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
-                    img, [_x], [_y], _a, _b, _theta, 1, err=_err, mask=mask,
-                    gain=gain, subpix=0)
+            if have_background:
+                for i, (_x_, _y_, _a_, _b_, _theta_) in enumerate(zip(
+                        x, y, a, b, theta)):
+                    flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
+                        img, [_x_], [_y_], _a_, _b_, _theta_, 1,
+                        err=background_rms, mask=mask, gain=gain, subpix=0)
+            else:
+                for i, (_x_, _y_, _a_, _b_, _theta_) in enumerate(zip(
+                        x, y, a, b, theta)):
+                    flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
+                        img, [_x_], [_y_], _a_, _b_, _theta_, 1,
+                        mask=mask, bkgann=(a_in, a_out), gain=gain, subpix=0)
+        elif have_background:
+            flux, flux_err, flags = sep.sum_ellipse(
+                img, x, y, a, b, theta, 1, err=background_rms, mask=mask,
+                gain=gain, subpix=0)
         else:
             flux, flux_err, flags = sep.sum_ellipse(
-                img, x, y, a, b, theta, 1, err=error, mask=mask, gain=gain,
-                subpix=0)
+                img, x, y, a, b, theta, 1, mask=mask, bkgann=(a_in, a_out),
+                gain=gain, subpix=0)
 
-    # Convert background sum to mean and subtract background from fluxes
     if have_background:
-        # Background area equals aperture area
-        flux -= bk_mean
-        bk_mean = bk_mean/area
+        # Subtract background from fluxes; background area equals aperture area
+        flux -= bk_flux
+        bk_mean = bk_flux/area
     else:
-        # Background area equals annulus area
-        bk_mean = bk_mean/bk_area
-        flux -= bk_mean*area
+        # Background area equals annulus area; background already subtracted
+        bk_mean = bk_flux/bk_area
 
     # Convert ADUs to electrons
     flux *= gain
     flux_err *= gain
     bk_mean *= gain
-    bk_sigma *= gain
 
     # Calculate aperture correction for all aperture sizes from the brightest
     # source
@@ -441,10 +457,6 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 thetai = theta
             else:
                 thetai = theta[i]
-            if ndim(error) == 1:
-                err = error[i]
-            else:
-                err = error
 
             if ai == bi:
                 nsat = sep.sum_circle(
@@ -459,23 +471,23 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
 
             # Obtain total flux by increasing aperture size until it grows
             # either more than before (i.e. a nearby source in the aperture) or
-            # less than the threshold (i.e. the growth curve reached saturation)
+            # less than the threshold (i.e. the growth curve reached
+            # saturation)
             f0 = f_prev = flux[i]
             dap = 0
             f_tot = df_prev = None
             while True:
                 dap += 0.1
                 if ai == bi:
-                    f, f_err, fl = sep.sum_circle(
-                        img, [xi], [yi], ai + dap, err=err, mask=mask,
-                        gain=gain, subpix=0)
+                    f, fl = sep.sum_circle(
+                        img, [xi], [yi], ai + dap, mask=mask, subpix=0)[::2]
                     area_i = sep.sum_circle(
                         area_img, [xi], [yi], ai + dap, mask=mask,
                         subpix=0)[0][0]
                 else:
-                    f, f_err, fl = sep.sum_ellipse(
+                    f, fl = sep.sum_ellipse(
                         img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1,
-                        err=err, mask=mask, gain=gain, subpix=0)
+                        mask=mask, subpix=0)[::2]
                     area_i = sep.sum_ellipse(
                         area_img, [xi], [yi], ai + dap, bi + dap, thetai, 1,
                         mask=mask, subpix=0)[0][0]
@@ -506,14 +518,14 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                     bj = aj*bi/ai
                     if aj == bj:
                         f, fl = sep.sum_circle(
-                            img, [xi], [yi], aj, err=err, mask=mask, gain=gain,
-                            subpix=0)[::2]
+                            img, [xi], [yi], aj, mask=mask, subpix=0)[::2]
                         area_j = sep.sum_circle(
-                            area_img, [xi], [yi], aj, mask=mask, subpix=0)[0][0]
+                            area_img, [xi], [yi], aj, mask=mask,
+                            subpix=0)[0][0]
                     else:
                         f, fl = sep.sum_ellipse(
-                            img, [xi], [yi], aj, bj, thetai, 1, err=err,
-                            mask=mask, gain=gain, subpix=0)[::2]
+                            img, [xi], [yi], aj, bj, thetai, 1, mask=mask,
+                            subpix=0)[::2]
                         area_j = sep.sum_ellipse(
                             area_img, [xi], [yi], aj, bj, thetai, 1,
                             mask=mask, subpix=0)[0][0]
@@ -570,7 +582,6 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     sources['aper_area'] = area
     sources['background_area'] = bk_area
     sources['background'] = bk_mean
-    sources['background_rms'] = bk_sigma
 
     # Apply aperture correction
     for i in good[0]:
