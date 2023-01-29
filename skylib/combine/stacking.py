@@ -210,14 +210,10 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 lo = True
             if hi is None:
                 hi = True
-            if rejection == 'rcr':
-                mean_type = 'median'
-                sigma_type = 'absdev68'
-            else:
-                mean_type = 'mean'
-                sigma_type = 'stddev'
-            datacube.mask = chauvenet(
-                datacube, min_vals=min_keep, mean=mean_type, sigma=sigma_type,
+            chauvenet(
+                datacube.data, datacube.mask, min_vals=min_keep,
+                mean_type=1 if rejection == 'rcr' else 0,
+                sigma_type=1 if rejection == 'rcr' else 0,
                 clip_lo=lo, clip_hi=hi)
         elif rejection == 'iraf':
             if lo is None:
