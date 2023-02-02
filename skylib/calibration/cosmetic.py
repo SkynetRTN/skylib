@@ -341,7 +341,10 @@ def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
 
     :return: corrected image
     """
-    if not img.dtype.isnative:
+    if img.dtype.name == 'float32':
+        # Numba is slower for 32-bit floating point
+        img = img.astype(np.float64)
+    elif not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.newbyteorder('=')
     initial_mask = flag_horiz(img, m=m_col, nu=nu_col)
