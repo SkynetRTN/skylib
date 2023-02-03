@@ -58,7 +58,7 @@ def stddev(data: np.ndarray, mask: Optional[np.ndarray]):
     else:
         sigma: np.ndarray = np.zeros(data.shape[1:])
         for j in prange(data.shape[1]):
-            for k in prange(data.shape[2]):
+            for k in range(data.shape[2]):
                 n = 0
                 s = 0
                 for i in range(data.shape[0]):
@@ -150,6 +150,7 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
     >>> chauvenet(x, min_vals=4)[0].nonzero()
     (array([2, 4]), array([3, 5]))
     """
+    assert 1 <= data.ndim <= 3
     if mask is None:
         mask = np.zeros(data.shape, np.bool8)
 
@@ -158,35 +159,35 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
     n_iter = 0
     while True:
         n = n_tot - mask.sum(0)
+        goodmask = ~mask
 
         if mean_override is None:
             if mean_type == 0:
                 if data.ndim == 1:
-                    mu = data[~mask].mean()
+                    mu = data[goodmask.nonzero()[0]].mean()
                 elif data.ndim == 2:
                     mu = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        mu[i] = data[:, i][~mask[:, i]].mean()
+                        mu[i] = data[goodmask[:, i].nonzero()[0], i].mean()
                 else:
                     mu = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
-                        for j in prange(data.shape[2]):
-                            mu[i, j] = data[:, i, j][~mask[:, i, j]].mean()
+                        for j in range(data.shape[2]):
+                            mu[i, j] = data[goodmask[:, i, j].nonzero()[0],
+                                            i, j].mean()
             else:
                 if data.ndim == 1:
-                    mu = np.median(data[~mask])
+                    mu = np.median(data[goodmask.nonzero()[0]])
                 elif data.ndim == 2:
                     mu = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        mu[i] = np.median(data[:, i][~mask[:, i]])
+                        mu[i] = np.median(data[goodmask[:, i].nonzero()[0], i])
                 else:
                     mu = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
-                        for j in prange(data.shape[2]):
-                            mu[i, j] = np.median(data[:, i, j][~mask[:, i, j]])
-        elif data.ndim > 1:
-            mu = np.empty(data.shape[1:], float)
-            mu[:] = mean_override
+                        for j in range(data.shape[2]):
+                            mu[i, j] = np.median(
+                                data[goodmask[:, i, j].nonzero()[0], i, j])
         else:
             mu = mean_override
 
@@ -210,7 +211,7 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                 else:
                     gamma = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
-                        for j in prange(data.shape[2]):
+                        for j in range(data.shape[2]):
                             gamma[i, j] = stddev(data[:, i, j], mask[:, i, j])
             else:
                 # Quantile for gamma depending on nu
@@ -224,8 +225,8 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                     q = 0.683
 
                 if data.ndim == 1:
-                    good = ~mask
-                    if good.any():
+                    good = goodmask.nonzero()[0]
+                    if len(good):
                         gamma = np.quantile(diff[good], q)
                     else:
                         gamma = 0
@@ -234,9 +235,9 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                 elif data.ndim == 2:
                     gamma = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        good = ~mask[:, i]
-                        if good.any():
-                            gamma[i] = np.quantile(diff[good][:, i], q)
+                        good = goodmask[:, i].nonzero()[0]
+                        if len(good):
+                            gamma[i] = np.quantile(diff[good, i], q)
                         else:
                             gamma[i] = 0
                         if gamma[i] <= 0:
@@ -244,11 +245,10 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                 else:
                     gamma = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
-                        for j in prange(data.shape[2]):
-                            good = ~mask[:, i, j]
-                            if good.any():
-                                gamma[i, j] = np.quantile(
-                                    diff[good][:, i, j], q)
+                        for j in range(data.shape[2]):
+                            good = goodmask[:, i, j].nonzero()[0]
+                            if len(good):
+                                gamma[i, j] = np.quantile(diff[good, i, j], q)
                             else:
                                 gamma[i, j] = 0
                             if gamma[i, j] <= 0:
@@ -263,19 +263,17 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                         gamma[i] *= corrfactor(n[i])
                 else:
                     for i in prange(data.shape[1]):
-                        for j in prange(data.shape[2]):
+                        for j in range(data.shape[2]):
                             gamma[i, j] *= corrfactor(n[i, j])
-        elif data.ndim > 1:
-            gamma = np.empty(data.shape[1:], float)
-            gamma[:] = sigma_override
         else:
             gamma = sigma_override
 
-        if max_iter and n_iter >= max_iter or \
-                data.ndim == 1 and n <= min_vals or \
-                data.ndim > 1 and (n <= min_vals).all() or \
-                not clip_lo and not clip_hi or \
-                data.ndim == 1 and (gamma <= 0 or np.isinf(gamma)):
+        if max_iter and n_iter >= max_iter or not clip_lo and not clip_hi:
+            break
+        if data.ndim == 1:
+            if n <= min_vals or np.isinf(gamma):
+                break
+        elif (n <= min_vals).all():
             break
 
         t = diff/gamma
@@ -291,18 +289,18 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
             t /= np.sqrt(2)
             cdf = np.empty(data.shape, float)
             if data.ndim == 1:
-                for i in prange(data.shape[0]):
+                for i in prange(n_tot):
                     cdf[i] = 0.5*(1 + math.erf(t[i]))
             elif data.ndim == 2:
-                for i in prange(data.shape[0]):
-                    for j in prange(data.shape[1]):
+                for i in prange(n_tot):
+                    for j in range(data.shape[1]):
                         cdf[i, j] = 0.5*(1 + math.erf(t[i, j]))
             else:
-                for i in prange(data.shape[0]):
-                    for j in prange(data.shape[1]):
-                        for k in prange(data.shape[2]):
+                for i in prange(n_tot):
+                    for j in range(data.shape[1]):
+                        for k in range(data.shape[2]):
                             cdf[i, j, k] = 0.5*(1 + math.erf(t[i, j, k]))
-        bad = ~mask & (n > min_vals) & (cdf > 1 - 0.25/n)
+        bad = goodmask & (n > min_vals) & (cdf > 1 - 0.25/n)
         n_bad = bad.sum(0)
         if data.ndim == 1 and (not n_bad or n - n_bad < min_vals) or \
                 data.ndim > 1 and (not n_bad.any() or
@@ -310,20 +308,20 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
             break
 
         if data.ndim == 1:
-            for i in prange(data.shape[0]):
+            for i in prange(n_tot):
                 if bad[i]:
                     mask[i] = True
         elif data.ndim == 2:
             for j in prange(data.shape[1]):
                 if n[j] - n_bad[j] >= min_vals:
-                    for i in prange(data.shape[0]):
+                    for i in range(n_tot):
                         if bad[i, j]:
                             mask[i, j] = True
         else:
             for j in prange(data.shape[1]):
-                for k in prange(data.shape[2]):
+                for k in range(data.shape[2]):
                     if n[j, k] - n_bad[j, k] >= min_vals:
-                        for i in prange(data.shape[0]):
+                        for i in range(n_tot):
                             if bad[i, j, k]:
                                 mask[i, j, k] = True
 
@@ -332,6 +330,11 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
 
         n_iter += 1
 
+    if data.ndim == 1:
+        if not np.isfinite(gamma):
+            gamma = 0
+    else:
+        gamma[(~np.isfinite(gamma)).nonzero()] = 0
     return mask, mu, gamma
 
 

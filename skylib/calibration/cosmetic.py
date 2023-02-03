@@ -44,7 +44,7 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
     h, w = img.shape
     s = min(2*m + 1, w)
     for i in prange(h):
-        for j in prange(w):
+        for j in range(w):
             left = j - m
             d = w - left - s
             ofs = m
@@ -146,7 +146,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
     h, w = img.shape
     mask = np.zeros_like(col_mask)
     for row in prange(h):
-        for col in prange(w):
+        for col in range(w):
             # Are we in a bad column?
             if col_mask[row, col]:
                 continue
@@ -212,7 +212,7 @@ def correct_cols_and_pixels(
     navg_pixel = (2*m_pixel + 1)**2 - 1
     output = np.empty_like(img)
     for row in prange(h):
-        for col in prange(w):
+        for col in range(w):
             if col_mask[row, col]:
                 # Replace bad column pixel by horizontal average of up to
                 # navg_col non-flagged pixels
