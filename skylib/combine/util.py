@@ -38,7 +38,10 @@ def get_data(f: Union[pyfits.HDUList, Tuple[Union[np.ndarray, ma.MaskedArray],
                 # Astropy bug handling sections for scaled data
                 data = f[hdu_no].data[start:end]
             else:
-                data = f[hdu_no].section[start:end]
+                try:
+                    data = f[hdu_no].section[start:end]
+                except TypeError:
+                    data = f[hdu_no].data[start:end]
         else:
             data = f[hdu_no].data
     else:
