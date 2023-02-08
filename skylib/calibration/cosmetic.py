@@ -368,7 +368,7 @@ def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         img = img.astype(np.float64)
     elif not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
-        img = img.newbyteorder('=')
+        img = img.byteswap().newbyteorder()
     initial_mask = flag_horiz(img, m=m_col, nu=nu_col)
     col_mask = flag_columns(initial_mask)
     pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)

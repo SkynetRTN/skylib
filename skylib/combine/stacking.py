@@ -210,6 +210,12 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 lo = True
             if hi is None:
                 hi = True
+            if datacube.dtype.name == 'float32':
+                # Numba is slower for 32-bit floating point
+                datacube = datacube.astype(np.float64)
+            elif not datacube.dtype.isnative:
+                # Non-native byte order is not supported by Numba
+                datacube = datacube.byteswap().newbyteorder()
             chauvenet(
                 datacube.data, datacube.mask, min_vals=min_keep,
                 mean_type=1 if rejection == 'rcr' else 0,
