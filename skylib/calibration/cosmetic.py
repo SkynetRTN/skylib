@@ -11,7 +11,6 @@ Adapted from the original code by Logan Selph.
 """
 
 import math
-from typing import Tuple
 
 import numpy as np
 from numba import njit, prange
@@ -63,7 +62,7 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def flag_columns(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def flag_columns(mask: np.ndarray) -> np.ndarray:
     """
     Flag pixels belonging to bad columns
 
@@ -71,12 +70,16 @@ def flag_columns(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         :func"`flag_horiz`
 
     :return: mask image with 1-s corresponding to bad pixels belonging to fully
-        or partially bad columns and array of indexes of bad columns
+        or partially bad columns
     """
     h, w = mask.shape
 
     # Identify columns with exceptionally high number of flagged pixels
-    nrej_all = mask.sum(0)
+    nrej_all = np.zeros(mask.shape[1], np.int32)
+    for j in prange(mask.shape[1]):
+        for i in range(mask.shape[0]):
+            if mask[i, j]:
+                nrej_all[j] += 1
     col_mask, mu, sigma = chauvenet(nrej_all, mean_type=1, sigma_type=1)
     flagged_col_indices = col_mask.nonzero()[0]
     n = len(flagged_col_indices)
@@ -104,9 +107,9 @@ def flag_columns(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         if nrej[p] > mu:
             best_hb = h
             for i in range(h - min_hb[p] + 1):  # start of bad part
-                for j in range(i + min_hb[p] - 1, h):  # end of bad part
+                for j in range(i + min_hb[p] - 1, h - 1):  # end of bad part
                     hb = j - i + 1  # height of bad part of the column
-                    if hb >= best_hb:
+                    if hb > best_hb:
                         continue
                     # Number of rejected pixels in the good part of the column
                     x = cdf[p, -1] - cdf[p, j]
@@ -116,24 +119,26 @@ def flag_columns(mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
                     mu_prime = mu*hg/h
                     sigma_prime = sigma*hg/h*sqrt2
                     if math.erf(abs(x - mu_prime)/sigma_prime) < 1 - 0.5/hg:
-                        best_hb = hb
-                        start = i
-                        end = j
+                        if hb < best_hb:
+                            best_hb = hb
+                            start = i
+                            end = j
+                        elif j > end:
+                            end = j
 
         mask[start:end+1, flagged_col_indices[p]] = True
 
-    return mask, flagged_col_indices
+    return mask
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
-                m: int = 2, nu: int = 4) -> np.ndarray:
+def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
+                nu: int = 4) -> np.ndarray:
     """
     Reject outlying pixels not belonging to bad columns
 
     :param img: input 2D image
     :param col_mask: bad column mask as returned by :func:`flag_columns`
-    :param bad_cols: indices of bad columns returned by :func:`flag_columns`
     :param m: bad column proximity half-range
     :param nu: number of degrees of freedom in Student's distribution; `nu` = 0
         means infinity = Gaussian distribution, nu = 1 => Lorentzian
@@ -143,6 +148,15 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
     :return: mask image with 1-s corresponding to bad pixels not belonging to
         bad columns
     """
+    # Get indices of columns containing at least one flagged pixel
+    bad_cols = np.zeros(col_mask.shape[1], np.bool8)
+    for j in range(col_mask.shape[1]):
+        for i in range(col_mask.shape[0]):
+            if col_mask[i, j]:
+                bad_cols[j] = True
+                break
+    bad_col_indices = bad_cols.nonzero()[0]
+
     h, w = img.shape
     mask = np.zeros_like(col_mask)
     for row in prange(h):
@@ -150,6 +164,13 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
             # Are we in a bad column?
             if col_mask[row, col]:
                 continue
+
+            # Detect proximity to bad column
+            proximity_flag = False
+            for j in bad_col_indices:
+                if j - m <= col <= j + m:
+                    proximity_flag = True
+                    break
 
             # Extract (2*m + 1)x(2*m + 1) vicinity of the pixel not belonging
             # to bad columns
@@ -165,12 +186,13 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
                         # Central pixel already added
                         continue
                     j = col + dx
-                    if j < 0 or j >= w or j in bad_cols:
-                        # Skip surrounding pixels that are in bad columns, even
-                        # though not necessarily flagged as bad
+                    if j < 0 or j >= w or col_mask[i, j]:
                         continue
-                    pixel_set[npixels] = img[i, j]
-                    npixels += 1
+                    # Ignore non-central pixels in the same column in proximity
+                    # to other bad columns
+                    if not proximity_flag or j:
+                        pixel_set[npixels] = img[i, j]
+                        npixels += 1
 
             # For a special case where the pixel we are analyzing is surrounded
             # by bad columns and/or on the edge of the image
@@ -194,7 +216,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, bad_cols: np.ndarray,
 @njit(nogil=True, parallel=True, cache=True)
 def correct_cols_and_pixels(
         img: np.ndarray, col_mask: np.ndarray, pixel_mask: np.ndarray,
-        m_col: int = 1, m_pixel: int = 1) -> np.ndarray:
+        m_col: int = 2, m_pixel: int = 1) -> np.ndarray:
     """
     Replace cosmetic defects and/or cosmic rays by local average
 
@@ -321,7 +343,7 @@ def correct_cols_and_pixels(
 
 def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
                      m_pixel: int = 2, nu_pixel: int = 4,
-                     m_corr_col: int = 1, m_corr_pixel: int = 1) \
+                     m_corr_col: int = 2, m_corr_pixel: int = 1) \
         -> np.ndarray:
     """
     Fully automatic and self-contained intra-image cosmetic correction pipeline
@@ -348,7 +370,7 @@ def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         # Non-native byte order is not supported by Numba
         img = img.newbyteorder('=')
     initial_mask = flag_horiz(img, m=m_col, nu=nu_col)
-    col_mask, bad_cols = flag_columns(initial_mask)
-    pixel_mask = flag_pixels(img, col_mask, bad_cols, m=m_pixel, nu=nu_pixel)
+    col_mask = flag_columns(initial_mask)
+    pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
     return correct_cols_and_pixels(
         img, col_mask, pixel_mask, m_col=m_corr_col, m_pixel=m_corr_pixel)
