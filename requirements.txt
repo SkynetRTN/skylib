@@ -10,3 +10,4 @@ photutils==1.6.0
 Pillow==9.4.0
 scipy==1.10.0
 sep==1.2.1
+tbb
