@@ -244,7 +244,7 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                     gamma = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
                         for j in range(data.shape[2]):
-                            gamma[i, j] = stddev(data[:, i, j], mask[:, i, j])
+                            gamma[i, j] = stddev(diff[:, i, j], mask[:, i, j])
             else:
                 # Quantile for gamma depending on nu
                 if nu == 1:
