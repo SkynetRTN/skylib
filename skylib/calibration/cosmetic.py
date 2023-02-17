@@ -172,47 +172,36 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             if col_mask[row, col]:
                 continue
 
-            # Detect proximity to bad column
-            proximity_flag = False
-            for j in bad_col_indices:
-                if j - m <= col <= j + m:
-                    proximity_flag = True
-                    break
-
             # Extract (2*m + 1)x(2*m + 1) vicinity of the pixel not belonging
             # to bad columns
             pixel_set = np.empty((2*m + 1)**2, img.dtype)
             pixel_set[0] = img[row, col]
             npixels = 1
-            for dy in range(-m, m + 1):
-                i = row + dy
-                if i < 0 or i >= h:
+            for j in range(max(col - m, 0), min(col + m + 1, w)):
+                # Ignore pixels in bad columns even if they are not marked
+                # as bad themselves
+                if j in bad_col_indices:
                     continue
-                for dx in range(-m, m + 1):
-                    if not dx and not dy:
-                        # Central pixel already added
-                        continue
-                    j = col + dx
-                    if j < 0 or j >= w or col_mask[i, j]:
-                        continue
-                    # Ignore non-central pixels in the same column in proximity
-                    # to other bad columns
-                    if not proximity_flag or j:
+
+                for i in range(max(row - m, 0), min(row + m + 1, h)):
+                    if i != row or j != col:
                         pixel_set[npixels] = img[i, j]
                         npixels += 1
 
             # For a special case where the pixel we are analyzing is surrounded
-            # by bad columns and/or on the edge of the image
-            if npixels < 2:
-                for dy in range(-m, m + 1):
-                    if not dy:
-                        continue
-                    i = row + dy
-                    if 0 <= i < h and not col_mask[i, col]:
+            # by bad columns and/or on the edge of the image, use only
+            # non-masked pixels above and below the current one
+            if npixels < 3:
+                npixels = 1
+                for i in range(max(row - m, 0), min(row + m + 1, h)):
+                    if i != row and not col_mask[i, col]:
                         pixel_set[npixels] = img[i, col]
                         npixels += 1
 
-            if chauvenet(
+            # Mark the pixel as bad if it's outlying compared to its non-masked
+            # vicinity or if there are not enough non-masked pixels to make
+            # a decision
+            if npixels < 3 or chauvenet(
                     pixel_set[:npixels], nu=nu, mean_type=1, sigma_type=1,
                     min_vals=2, check_idx=0)[0][0]:
                 mask[row, col] = True
@@ -293,14 +282,17 @@ def correct_cols_and_pixels(
                         navg += 1
                     if navg == navg_col:
                         break
+
                     j = col + r
                     if j < w and not col_mask[row, j] and \
                             not pixel_mask[row, j]:
                         avg_data[navg] = img[row, j]
                         navg += 1
+
                     r += 1
                     if r >= w:
                         break
+
                 if navg:
                     output[row, col] = avg_data[:navg].mean()
                 else:
