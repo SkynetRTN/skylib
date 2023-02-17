@@ -6,11 +6,16 @@ Adapted from the original code by Logan Selph.
 :func:`correct_cosmetic`: high-level automatic intra-image correction pipeline.
 :func:`flag_horiz`, :func:`flag_columns`, :func:`flag_pixels`: individual
     cosmetic defect rejection steps.
+:func:`detect_defects`: obtain bad column and pixel masks from the given image;
+    a wrapper around :func:`flag_*`
 :func:`correct_cols_and_pixels`: eliminate cosmetic defects by local averaging
-    using rejection maps obtained by :func:`flag_*`.
+    using rejection maps obtained by :func:`flag_*` or :func:`detect_defects`.
+:func:`correct_cosmetic`: obtain and eliminate cosmetic defects from
+    a single image or apply the previously obtained bad column and pixel masks
 """
 
 import math
+from typing import Optional, Tuple
 
 import numpy as np
 from numba import njit, prange
@@ -19,7 +24,9 @@ from ..util.stats import chauvenet
 
 
 __all__ = [
-    'correct_cosmetic',
+    # High-level interface
+    'detect_defects', 'correct_cosmetic',
+    # Internal lower-level defect detection and correction functions
     'flag_horiz', 'flag_columns', 'flag_pixels', 'correct_cols_and_pixels',
 ]
 
@@ -213,12 +220,49 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
     return mask
 
 
+def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
+                   m_pixel: int = 2, nu_pixel: int = 4) \
+        -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Detect cosmetic defects (bad columns and isolated pixels) from the given
+    image
+
+    :param img: input image
+    :param m_col: bad column detection half-range
+    :param nu_col: number of degrees of freedom in Student's distribution for
+        bad column detection; `nu` = 0 means infinity = Gaussian distribution,
+        nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
+        for other values, CDF is not analytically invertible
+    :param m_pixel: bad column proximity half-range for isolated bad pixel
+        detection
+    :param nu_pixel: number of degrees of freedom in Student's distribution for
+        bad pixel detection
+
+    :return: bad column and bad pixel masks that can be passed to
+        :func:`correct_cols_and_pixels` or :func:`correct_cosmetic`
+    """
+    if img.dtype.name == 'float32':
+        # Numba is slower for 32-bit floating point
+        img = img.astype(np.float64)
+    elif not img.dtype.isnative:
+        # Non-native byte order is not supported by Numba
+        img = img.byteswap().newbyteorder()
+
+    col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+    pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
+
+    return col_mask, pixel_mask
+
+
 @njit(nogil=True, parallel=True, cache=True)
 def correct_cols_and_pixels(
         img: np.ndarray, col_mask: np.ndarray, pixel_mask: np.ndarray,
         m_col: int = 2, m_pixel: int = 1) -> np.ndarray:
     """
     Replace cosmetic defects and/or cosmic rays by local average
+
+    WARNING. This function requires a specific dtype of `img`; use
+             :func:`correct_cosmetic` if `img`.dtype is not guaranteed.
 
     :param img: image to correct
     :param col_mask: bad column mask as returned by :func:`flag_columns`
@@ -341,23 +385,28 @@ def correct_cols_and_pixels(
     return output
 
 
-def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
-                     m_pixel: int = 2, nu_pixel: int = 4,
-                     m_corr_col: int = 2, m_corr_pixel: int = 1) \
-        -> np.ndarray:
+def correct_cosmetic(
+        img: np.ndarray, col_mask: Optional[np.ndarray] = None,
+        pixel_mask: Optional[np.ndarray] = None, m_col: int = 10,
+        nu_col: int = 0, m_pixel: int = 2, nu_pixel: int = 4,
+        m_corr_col: int = 2, m_corr_pixel: int = 1) -> np.ndarray:
     """
     Fully automatic and self-contained intra-image cosmetic correction pipeline
 
     :param img: uncorrected 2D image
-    :param m_col: bad column rejection half-range
+    :param col_mask: optional bad column mask; if omitted, estimated on the fly
+        from `img` using :func:`flag_horiz` and :func:`flag_columns`
+    :param pixel_mask: optional isolated bad pixel mas; if omitted, estimated
+        on the fly from the image using :func:`flag_pixels`
+    :param m_col: bad column detection half-range
     :param nu_col: number of degrees of freedom in Student's distribution for
-        bad column rejection; `nu` = 0 means infinity = Gaussian distribution,
+        bad column detection; `nu` = 0 means infinity = Gaussian distribution,
         nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
         for other values, CDF is not analytically invertible
     :param m_pixel: bad column proximity half-range for isolated bad pixel
-        rejection
+        detection
     :param nu_pixel: number of degrees of freedom in Student's distribution for
-        bad pixel rejection
+        bad pixel detection
     :param m_corr_col: bad column correction range
     :param m_corr_pixel: bad pixel correction range
 
@@ -369,8 +418,16 @@ def correct_cosmetic(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
     elif not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
-    initial_mask = flag_horiz(img, m=m_col, nu=nu_col)
-    col_mask = flag_columns(initial_mask)
-    pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
+
+    if col_mask is None:
+        col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+    elif col_mask.dtype.name != 'bool':
+        col_mask = col_mask.astype(np.bool8)
+
+    if pixel_mask is None:
+        pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
+    elif pixel_mask.dtype.name != 'bool':
+        pixel_mask = pixel_mask.astype(np.bool8)
+
     return correct_cols_and_pixels(
         img, col_mask, pixel_mask, m_col=m_corr_col, m_pixel=m_corr_pixel)
