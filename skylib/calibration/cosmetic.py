@@ -87,7 +87,8 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
         for i in range(mask.shape[0]):
             if mask[i, j]:
                 nrej_all[j] += 1
-    col_mask, mu, sigma = chauvenet(nrej_all, mean_type=1, sigma_type=1)
+    col_mask, mu, sigma = chauvenet(
+        nrej_all, mean_type=1, sigma_type=1, clip_lo=False)
     flagged_col_indices = col_mask.nonzero()[0]
     n = len(flagged_col_indices)
     nrej = nrej_all[flagged_col_indices]
