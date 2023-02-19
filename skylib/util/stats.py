@@ -223,28 +223,20 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
         else:
             mu = mean_override
 
-        if clip_lo and clip_hi:
-            diff = np.abs(data - mu)
-        elif clip_lo:
-            # noinspection PyTypeChecker
-            diff = np.clip(mu - data, 0, None)
-        else:
-            # noinspection PyTypeChecker
-            diff = np.clip(data - mu, 0, None)
-
+        dev = data - mu
         if sigma_override is None:
             if sigma_type == 0:
                 if ndim == 1:
-                    gamma = stddev(diff, mask)
+                    gamma = stddev(dev, mask)
                 elif ndim == 2:
                     gamma = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        gamma[i] = stddev(diff[:, i], mask[:, i])
+                        gamma[i] = stddev(dev[:, i], mask[:, i])
                 else:
                     gamma = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
                         for j in range(data.shape[2]):
-                            gamma[i, j] = stddev(diff[:, i, j], mask[:, i, j])
+                            gamma[i, j] = stddev(dev[:, i, j], mask[:, i, j])
             else:
                 # Quantile for gamma depending on nu
                 if nu == 1:
@@ -260,32 +252,33 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
 
                 if ndim == 1:
                     if goodmask.any():
-                        gamma = quantile(diff[goodmask], q)
+                        gamma = quantile(np.abs(dev[goodmask]), q)
                     else:
                         gamma = 0
                     if gamma <= 0:
-                        gamma = stddev(diff, mask)
+                        gamma = stddev(dev, mask)
                 elif ndim == 2:
                     gamma = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
                         if goodmask[:, i].any():
-                            gamma[i] = quantile(diff[goodmask[:, i], i], q)
+                            gamma[i] = quantile(
+                                np.abs(dev[goodmask[:, i], i]), q)
                         else:
                             gamma[i] = 0
                         if gamma[i] <= 0:
-                            gamma[i] = stddev(diff[:, i], mask[:, i])
+                            gamma[i] = stddev(dev[:, i], mask[:, i])
                 else:
                     gamma = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
                         for j in range(data.shape[2]):
                             if goodmask[:, i, j].any():
                                 gamma[i, j] = quantile(
-                                    diff[goodmask[:, i, j], i, j], q)
+                                    np.abs(dev[goodmask[:, i, j], i, j]), q)
                             else:
                                 gamma[i, j] = 0
                             if gamma[i, j] <= 0:
                                 gamma[i, j] = stddev(
-                                    diff[:, i, j], mask[:, i, j])
+                                    dev[:, i, j], mask[:, i, j])
         else:
             gamma = sigma_override
 
@@ -297,6 +290,15 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
                 break
         elif (n <= min_vals).all():
             break
+
+        if clip_lo and clip_hi:
+            diff = np.abs(dev)
+        elif clip_lo:
+            # noinspection PyTypeChecker
+            diff = np.clip(-dev, 0, None)
+        else:
+            # noinspection PyTypeChecker
+            diff = np.clip(dev, 0, None)
 
         t = diff/gamma
         if nu == 1:  # Lorentzian
