@@ -414,13 +414,25 @@ def correct_cosmetic(
 
     if col_mask is None:
         col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
-    elif col_mask.dtype.name != 'bool':
-        col_mask = col_mask.astype(np.bool8)
+    else:
+        if col_mask.shape != img.shape:
+            raise ValueError(
+                f'Bad column map shape mismatch: expected '
+                f'{img.shape[1]}x{img.shape[0]}, got '
+                f'{col_mask.shape[1]}x{col_mask.shape[0]}')
+        if col_mask.dtype.name != 'bool':
+            col_mask = col_mask.astype(np.bool8)
 
     if pixel_mask is None:
         pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
-    elif pixel_mask.dtype.name != 'bool':
-        pixel_mask = pixel_mask.astype(np.bool8)
+    else:
+        if pixel_mask.shape != img.shape:
+            raise ValueError(
+                f'Bad pixel map shape mismatch: expected '
+                f'{img.shape[1]}x{img.shape[0]}, got '
+                f'{col_mask.shape[1]}x{col_mask.shape[0]}')
+        if pixel_mask.dtype.name != 'bool':
+            pixel_mask = pixel_mask.astype(np.bool8)
 
     return correct_cols_and_pixels(
         img, col_mask, pixel_mask, m_col=m_corr_col, m_pixel=m_corr_pixel)
