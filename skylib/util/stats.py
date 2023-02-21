@@ -92,6 +92,8 @@ def quantile(data: np.ndarray, q: float) -> float:
     data = data.copy()
     data.sort()
     n = len(data)
+    if not n:
+        return 0.0
     i = int(np.floor(q*n))
     i_minus = q*(n - 1)
     if n == 2:
@@ -198,28 +200,47 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
         if mean_override is None:
             if mean_type == 0:
                 if ndim == 1:
-                    mu = data[goodmask].mean()
+                    if n:
+                        mu = data[goodmask].mean()
+                    else:
+                        mu = 0
                 elif ndim == 2:
                     mu = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        mu[i] = data[goodmask[:, i], i].mean()
+                        if n[i]:
+                            mu[i] = data[goodmask[:, i], i].mean()
+                        else:
+                            mu[i] = 0
                 else:
                     mu = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
                         for j in range(data.shape[2]):
-                            mu[i, j] = data[goodmask[:, i, j], i, j].mean()
+                            if n[i, j]:
+                                mu[i, j] = data[goodmask[:, i, j], i, j].mean()
+                            else:
+                                mu[i, j] = 0
             else:
                 if ndim == 1:
-                    mu = np.median(data[goodmask])
+                    if n:
+                        mu = np.median(data[goodmask])
+                    else:
+                        mu = 0
                 elif ndim == 2:
                     mu = np.empty(data.shape[1], float)
                     for i in prange(data.shape[1]):
-                        mu[i] = np.median(data[goodmask[:, i], i])
+                        if n[i]:
+                            mu[i] = np.median(data[goodmask[:, i], i])
+                        else:
+                            mu[i] = 0
                 else:
                     mu = np.empty(data.shape[1:], float)
                     for i in prange(data.shape[1]):
                         for j in range(data.shape[2]):
-                            mu[i, j] = np.median(data[goodmask[:, i, j], i, j])
+                            if n[i, j]:
+                                mu[i, j] = np.median(
+                                    data[goodmask[:, i, j], i, j])
+                            else:
+                                mu[i, j] = 0
         else:
             mu = mean_override
 
