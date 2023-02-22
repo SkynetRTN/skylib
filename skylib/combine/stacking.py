@@ -580,8 +580,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             multiplicative_percentile: float = 99.9,
             equalize_global: bool = False,
             smart_stacking: Optional[str] = None, max_mem_mb: float = 100.0,
-            callback: Optional[callable] = None) \
-        -> List[Tuple[np.ndarray, pyfits.Header]]:
+            callback: Optional[callable] = None, return_headers: bool = True) \
+        -> List[Union[Tuple[np.ndarray, pyfits.Header], np.ndarray]]:
     """
     Combine a series of FITS images using the various stacking modes with
     optional scaling and outlier rejection
@@ -658,12 +658,15 @@ def combine(input_data: List[Union[pyfits.HDUList,
             def callback(percent: float) -> None
         that is periodically called to update the progress of stacking
         operation
+    :param return_headers: for each input HDU#, compile a header from input
+        headers with info about stacking
 
     :return: list of pairs (data, header) of the same length as the number
         of HDUs in the input FITS images (one if a (data, header) list
         was supplied on input), with data set to combined array(s) and
         header(s) copied from one of the input images and modified to reflect
-        the stacking mode and parameters
+        the stacking mode and parameters; if `return_headers`=False, only data
+        is returned
     """
     if prescaling and not rejection:
         # Disable prescaling if rejection was not enabled
@@ -821,6 +824,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     equalize_global=equalize_global, max_mem_mb=max_mem_mb,
                     callback=callback)
                 total_progress += progress_step
+
+        if not return_headers:
+            output.append(res)
+            continue
 
         # Update FITS headers, start from the first image
         headers = [f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
