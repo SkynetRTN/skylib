@@ -3,16 +3,13 @@ Math behind image mosaicing
 """
 
 import gc
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
 from numpy import ma
 from numpy.linalg import lstsq
 from scipy.sparse import csc_array
 from scipy.sparse.linalg import lsqr as sparse_lstsq
-import astropy.io.fits as pyfits
-
-from .util import get_data
 
 
 __all__ = ['get_equalization_transforms', 'global_equalize']
@@ -42,11 +39,8 @@ def _get_overlap(data: Union[np.ndarray, ma.MaskedArray],
 
 
 def get_equalization_transforms(
-        hdu_no: int, progress: float, progress_step: float,
-        data_width: int, data_height: int,
-        input_data: List[Union[pyfits.HDUList,
-                               Tuple[Union[np.ndarray, ma.MaskedArray],
-                                     pyfits.Header]]],
+        progress: float, progress_step: float, data_width: int,
+        data_height: int, input_data: List[callable],
         equalize_additive: bool = False, equalize_order: int = 0,
         equalize_multiplicative: bool = True,
         multiplicative_percentile: float = 99.9, max_mem_mb: float = 100.0,
@@ -55,14 +49,15 @@ def get_equalization_transforms(
     Calculate tile equalization transformations that make the individual tile
     counts match in the regions of overlap
 
-    :param hdu_no: 0-based index of HDU if FITS files supplied on input contain
-        multiple HDUs
     :param progress: total stacking job progress by the equalization stage
     :param progress_step: percentage of total stacking job progress for each
         individual stacking
     :param data_width: width of images being stacked
     :param data_height: height of images being stacked
-    :param input_data: input FITS images or (data, header) pairs
+    :param input_data: list of callables
+            get_data(start: int = 0, end: Optional[int] = None,
+                     downsample: int = 1) -> Union[np.ndarray, ma.MaskedArray)
+        returning each data array on the fly
     :param equalize_additive: enable additive equalization
     :param equalize_order: additive equalization polynomial order
     :param equalize_multiplicative: enable multiplicative equalization
@@ -78,9 +73,11 @@ def get_equalization_transforms(
         1, x, y, x^2, xy, y^2, etc., depending on `equalize_order`
     """
     n = len(input_data)
-    bytes_per_pixel = max(
-        abs((data[hdu_no].header if isinstance(data, pyfits.HDUList)
-             else data[1])['BITPIX'])//8 for data in input_data) + 1
+    bytes_per_pixel = []
+    for f in input_data:
+        bytes_per_pixel.append(f(start=0, end=1).itemsize)
+        gc.collect()
+    bytes_per_pixel = max(bytes_per_pixel) + 1
     transformations, overlaps, images_with_overlaps = {}, {}, []
     progress_step /= 2*(2 + int(equalize_additive) +
                         int(equalize_multiplicative))
@@ -88,13 +85,13 @@ def get_equalization_transforms(
     # Step 1: count the total number of overlapping pixels
     m, skip = 0, []
     for data_no, f in enumerate(input_data):
-        data = get_data(f, hdu_no)
+        data = f()
         for other_data_no, other_f in enumerate(input_data):
             if other_data_no == data_no or \
                     (data_no, other_data_no) in skip:
                 continue
             skip.append((other_data_no, data_no))
-            overlap = _get_overlap(data, get_data(other_f, hdu_no))
+            overlap = _get_overlap(data, other_f())
             if overlap.shape:
                 m += overlap.sum()
             else:
@@ -113,7 +110,7 @@ def get_equalization_transforms(
     # each image
     m, skip = 0, []
     for data_no, f in enumerate(input_data):
-        data = get_data(f, hdu_no, downsample=downsample)
+        data = f(downsample=downsample)
         # Identify all available overlaps with the other images
         overlaps_for_file = {}
         for other_data_no, other_f in enumerate(input_data):
@@ -125,7 +122,7 @@ def get_equalization_transforms(
             skip.append((other_data_no, data_no))
 
             gc.collect()
-            other_data = get_data(other_f, hdu_no, downsample=downsample)
+            other_data = other_f(downsample=downsample)
             overlap = _get_overlap(data, other_data)
             if not overlap.any():
                 continue
