@@ -14,7 +14,6 @@ from tempfile import TemporaryFile
 
 import numpy as np
 from numpy import ma
-from scipy import stats
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -83,7 +82,7 @@ def _calc_scaling(scaling: str, percentile: float,
                 data = data.compressed()
             else:
                 data = data.ravel()
-            ofs = -stats.mode(data)
+            ofs = -np.median(data)
             avg = (data + ofs).mean()
 
         else:
