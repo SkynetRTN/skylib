@@ -8,7 +8,7 @@ modes with optional scaling and outlier rejection.
 import gc
 import os.path
 import logging
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, BinaryIO, List, Optional, Tuple, Union
 from datetime import timedelta
 from tempfile import TemporaryFile
 
@@ -201,11 +201,62 @@ def _combine_data(mode: str, percentile: float, datacube: np.ndarray,
     return res
 
 
-def _do_combine(hdu_no: int, progress: float, progress_step: float,
-                data_width: int, data_height: int,
-                input_data: List[Union[pyfits.HDUList,
-                                       Tuple[Union[np.ndarray, ma.MaskedArray],
-                                             pyfits.Header]]],
+def _get_data_override_mask(i: int, input_data: List[callable],
+                            data_width: int, data_height: int,
+                            mask_files: List[BinaryIO],
+                            start: int = 0, end: Optional[int] = None,
+                            downsample: int = 1) -> ma.MaskedArray:
+    """
+    Image data retrieval function that supports rejection mask stored in
+    a separate temporary file
+
+    :param i: index of the image in `input_data` and `mask_files`
+    :param input_data: list of data retrieval callables returning image data
+    :param data_width: initial image width
+    :param data_height: initial image height
+    :param mask_files: list of open :class:`tempfile.TemporaryFile` objects
+        holding rejection masks for each image
+    :param start: first row of chunk
+    :param end: last row of chunk
+    :param downsample: downsampling factor
+    :return:
+    """
+    # Retrieve downsampled chunk of original data
+    data = input_data[i](start=start, end=end, downsample=downsample)
+
+    # Retrieve rejection mask
+    mf = mask_files[i]
+    if mf is None:
+        return data
+
+    mf.seek(0)
+    if end is None or end > data_height:
+        end = data_height
+    h, w = end - start, data_width
+    mask = np.fromfile(
+        mf, dtype=np.bool8, offset=start*w, count=h*w).reshape((h, w))
+
+    # Downsample mask if needed
+    if downsample >= 2:
+        width = w//downsample
+        height = h//downsample
+        if h/downsample % 1:
+            mask = mask[:height*downsample]
+        if w/downsample % 1:
+            mask = mask[:, :width*downsample]
+        mask = (mask.reshape(height, downsample, width, downsample)
+                .sum(3).sum(1)/downsample**2).astype(np.bool8)
+
+    # Replace the original image mask with rejection mask
+    if isinstance(data, ma.MaskedArray):
+        data.mask = mask
+    else:
+        data = ma.masked_array(data, mask)
+
+    return data
+
+
+def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                 mode: str = 'average', percentile: float = 50.0,
                 scaling: Optional[str] = None,
                 scaling_percentile: float = 50.0,
@@ -218,18 +269,24 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 multiplicative_percentile: float = 99.9,
                 equalize_global: bool = False,
                 max_mem_mb: float = 100.0,
-                callback: Optional[Callable] = None) \
-        -> Tuple[Union[np.ndarray, ma.MaskedArray], float]:
+                callback: Optional[Callable] = None, progress: float = 0,
+                progress_step: float = 0, save_masks: bool = False) \
+        -> Tuple[Union[np.ndarray, ma.MaskedArray], float, List[BinaryIO]]:
     """
     Combine the given HDUs from all input images; used by :func:`combine` to
     get a stack of either all input images or, if smart stacking is enabled,
     of their subset
 
-    :return: image stack data and rejection percent
+    :return: image stack data, rejection percent, and list of temporary files
+        holding rejection masks if rejection = True and either scaling != None
+        or save_masks = True
     """
     if prescaling and not rejection:
         # Disable prescaling if rejection was not enabled
         prescaling = None
+
+    if scaling and rejection:
+        save_masks = True
 
     n = len(input_data)
     progress_step /= (
@@ -250,12 +307,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     if equalize_additive or equalize_multiplicative:
         # Equalize the common image parts; suitable for mosaicing
         transformations = get_equalization_transforms(
-            progress, progress_step, data_width, data_height,
-            [lambda *args, i=i, **kwargs:
-             get_data(input_data[i], hdu_no, *args, **kwargs)
-             for i in range(n)], equalize_additive, equalize_order,
-            equalize_multiplicative, multiplicative_percentile, max_mem_mb,
-            callback)
+            progress, progress_step, data_width, data_height, input_data,
+            equalize_additive, equalize_order, equalize_multiplicative,
+            multiplicative_percentile, max_mem_mb, callback)
         progress += progress_step
     else:
         transformations = {}
@@ -263,9 +317,8 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     # Calculate prescaling offsets and factors
     if prescaling:
         prescaling_offsets, prescaling_factors = _calc_scaling(
-            prescaling, prescaling_percentile,
-            [lambda i=i: get_data(input_data[i], hdu_no) for i in range(n)],
-            callback, progress, progress_step)
+            prescaling, prescaling_percentile, input_data, callback, progress,
+            progress_step)
         progress += progress_step
     else:
         prescaling_offsets, prescaling_factors = [], []
@@ -274,18 +327,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
     # otherwise, do this after rejection
     if scaling and not rejection:
         scaling_offsets, scaling_factors = _calc_scaling(
-            scaling, scaling_percentile,
-            [lambda i=i: get_data(input_data[i], hdu_no) for i in range(n)],
-            callback, progress, progress_step)
+            scaling, scaling_percentile, input_data, callback, progress,
+            progress_step)
         progress += progress_step
     else:
         scaling_offsets, scaling_factors = [], []
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
-    bytes_per_pixel = max(
-        abs((data[hdu_no].header if isinstance(data, pyfits.HDUList)
-             else data[1])['BITPIX'])//8 for data in input_data) + 1
-    rowsize = total_rowsize = data_width*bytes_per_pixel*len(input_data)
+    bytes_per_pixel = max(f(start=0, end=1).itemsize for f in input_data) + 1
+    rowsize = total_rowsize = data_width*bytes_per_pixel*n
     if prescaling:
         total_rowsize += rowsize
     if rejection:
@@ -299,17 +349,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
             break
         chunksize -= 1
     chunks = []
-    if scaling and rejection:
+    if save_masks:
         # Prepare temporary files that will store masks after rejection
         mask_files = [TemporaryFile() for _ in range(n)]
     else:
-        mask_files = []
+        mask_files = [None]*n
     rej_percent = 0
     for chunk in range(0, data_height, chunksize):
-        unscaled_datacube = [
-            get_data(f, hdu_no, chunk, chunk + chunksize)
-            for f in input_data
-        ]
+        unscaled_datacube = [f(start=chunk, end=chunk + chunksize)
+                             for f in input_data]
 
         # Scale data
         if prescaling:
@@ -399,13 +447,15 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
                 datacube.mask[outliers.nonzero()] = True
             gc.collect()
 
-        if scaling and rejection:
-            # With both scaling and rejection enabled, we cannot stack right
-            # away since we'll need the whole image rejection mask; save
-            # the calculated mask and do the stacking later
-            rej_percent += datacube.mask.sum()
+        if save_masks:
             for data, f in zip(datacube, mask_files):
                 data.mask.tofile(f)
+
+        if scaling and rejection:
+            # With both scaling and rejection enabled, we cannot stack right
+            # away since we'll need the whole image rejection mask after all
+            # mask chunks have been saved
+            rej_percent += datacube.mask.sum()
         else:
             # Restore original data if scaling was enabled, keep the mask
             if prescaling:
@@ -445,44 +495,20 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
 
     if scaling and rejection:
         # Restore the rejection mask and calculate offsets and scaling factors
-        def _get_data(i, start: int = 0, end: Optional[int] = None,
-                      downsample: int = 1):
-            data = get_data(
-                input_data[i], hdu_no, start=start, end=end,
-                downsample=downsample)
-            _mf = mask_files[i]
-            _mf.seek(0)
-            if end is None:
-                end = data_height
-            h, w = end - start, data_width
-            mask = np.fromfile(
-                _mf, dtype=np.bool8, offset=start*w, count=h*w).reshape((h, w))
-            if downsample >= 2:
-                width = w//downsample
-                height = h//downsample
-                if h/downsample % 1:
-                    mask = mask[:height*downsample]
-                if w/downsample % 1:
-                    mask = mask[:, :width*downsample]
-                mask = (mask.reshape(height, downsample, width, downsample)
-                        .sum(3).sum(1)/downsample**2).astype(np.bool8)
-            if isinstance(data, ma.MaskedArray):
-                data.mask = mask
-            else:
-                data = ma.masked_array(data, mask)
-            return data
-
         scaling_offsets, scaling_factors = _calc_scaling(
             scaling, scaling_percentile,
-            [lambda i=i: _get_data(i) for i in range(n)], callback, progress,
-            progress_step)
+            [lambda i=i: _get_data_override_mask(
+                i, input_data, data_width, data_height, mask_files)
+             for i in range(n)], callback, progress, progress_step)
         progress += progress_step
 
         if equalize_additive or equalize_multiplicative:
             # Recompute equalization transformations after rejection
             transformations = get_equalization_transforms(
                 progress, progress_step, data_width, data_height,
-                [lambda *args, i=i, **kwargs: _get_data(i, *args, **kwargs)
+                [lambda *args, i=i, **kwargs: _get_data_override_mask(
+                    i, input_data, data_width, data_height, mask_files,
+                    *args, **kwargs)
                  for i in range(n)],
                 equalize_additive, equalize_order, equalize_multiplicative,
                 multiplicative_percentile, max_mem_mb, callback)
@@ -491,10 +517,9 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # Scale and stack by chunk
         for chunk in range(0, data_height, chunksize):
             # Load image data with the original mask
-            datacube = ma.masked_array([
-                get_data(f, hdu_no, chunk, chunk + chunksize)
-                for f in input_data
-            ], fill_value=np.nan)
+            datacube = ma.masked_array(
+                [f(start=chunk, end=chunk + chunksize) for f in input_data],
+                fill_value=np.nan)
             if not datacube.mask.shape:
                 datacube.mask = np.full(datacube.shape, datacube.mask)
             if propagate_mask:
@@ -560,7 +585,7 @@ def _do_combine(hdu_no: int, progress: float, progress_step: float,
         # by fitting the model to the entire mosaic
         res = global_equalize(res, equalize_order)
 
-    return res, rej_percent
+    return res, rej_percent, mask_files
 
 
 def combine(input_data: List[Union[pyfits.HDUList,
@@ -755,20 +780,25 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     '{:d}x{:d} and {:d}x{:d}'.format(
                         data_width, data_height, w, h))
 
-        # Stack all input images; disable rejection in smart stacking mode
-        res, rej_percent = _do_combine(
-            hdu_no, total_progress, progress_step, data_width, data_height,
-            input_data, mode, percentile=percentile,
+        # Stack all input images; obtain rejection masks, which will be needed
+        # in smart stacking mode
+        res, rej_percent, mask_files = _do_combine(
+            [lambda *args, i=i, **kwargs:
+             get_data(input_data[i], hdu_no, *args, **kwargs)
+             for i in range(n)], data_width, data_height,
+            mode, percentile=percentile,
             scaling=scaling, scaling_percentile=scaling_percentile,
             prescaling=prescaling, prescaling_percentile=prescaling_percentile,
-            rejection=None if score_func and len(input_data) > 1
-            else rejection, lo=lo, hi=hi, min_keep=min_keep,
+            rejection=rejection, lo=lo, hi=hi, min_keep=min_keep,
             propagate_mask=propagate_mask, equalize_additive=equalize_additive,
             equalize_order=equalize_order,
             equalize_multiplicative=equalize_multiplicative,
             multiplicative_percentile=multiplicative_percentile,
             equalize_global=equalize_global, max_mem_mb=max_mem_mb,
-            callback=callback)
+            callback=callback, progress=total_progress,
+            progress_step=progress_step,
+            save_masks=rejection and score_func is not None and
+            len(input_data) > 1)
         total_progress += progress_step
 
         final_data = list(input_data)
@@ -780,15 +810,34 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 if len(final_data) < 2:
                     break
                 new_data = list(final_data)
+                new_mask_files = list(mask_files)
                 # Cannot just do new_data.remove(image_to_exclude) in older
                 # Python versions
                 for i, x in enumerate(final_data):
                     if x is image_to_exclude:
-                        del new_data[i]
+                        del new_data[i], new_mask_files[i]
                         break
-                new_res, new_rej_percent = _do_combine(
-                    hdu_no, total_progress, progress_step, data_width,
-                    data_height, new_data, mode, percentile=percentile,
+                # Disable rejection during smart stacking; use the previously
+                # computed rejection masks stored in mask_files
+                new_data_getters = [
+                    lambda *args, i=i, **kwargs:
+                    get_data(new_data[i], hdu_no, *args, **kwargs)
+                    for i in range(len(new_data))]
+                if new_mask_files.count(None) == len(new_mask_files):
+                    # No rejection masks stored in intermediate files, use
+                    # normal data getters
+                    new_input_data = new_data_getters
+                else:
+                    # Use data getters overriding mask with the one stored in
+                    # intermediate file
+                    new_input_data = [
+                        lambda *args, i=i, **kwargs: _get_data_override_mask(
+                            i, new_data_getters, data_width, data_height,
+                            new_mask_files, *args, **kwargs)
+                        for i in range(len(new_data))]
+                new_res, new_rej_percent, _ = _do_combine(
+                    new_input_data, data_width, data_height,
+                    mode, percentile=percentile,
                     scaling=scaling, scaling_percentile=scaling_percentile,
                     prescaling=prescaling,
                     prescaling_percentile=prescaling_percentile,
@@ -799,19 +848,26 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     equalize_multiplicative=equalize_multiplicative,
                     multiplicative_percentile=multiplicative_percentile,
                     equalize_global=equalize_global, max_mem_mb=max_mem_mb,
-                    callback=callback)
+                    callback=callback, progress=total_progress,
+                    progress_step=progress_step)
+                del new_input_data, new_data_getters
                 total_progress += progress_step
                 new_score = score_func(new_res)
                 if new_score > score:
                     # Score improved, reject the current image
                     score, final_data = new_score, new_data
                     res, rej_percent = new_res, new_rej_percent
+                    mask_files = new_mask_files
+                del new_data, new_mask_files, new_res
+                gc.collect()
 
             # Re-stack the final set of images with rejection enabled
             if rejection:
-                res, rej_percent = _do_combine(
-                    hdu_no, total_progress, progress_step, data_width,
-                    data_height, final_data, mode, percentile=percentile,
+                res, rej_percent, _ = _do_combine(
+                    [lambda *args, i=i, **kwargs:
+                     get_data(final_data[i], hdu_no, *args, **kwargs)
+                     for i in range(len(final_data))], data_width, data_height,
+                    mode, percentile=percentile,
                     scaling=scaling, scaling_percentile=scaling_percentile,
                     prescaling=prescaling,
                     prescaling_percentile=prescaling_percentile,
@@ -822,8 +878,12 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     equalize_multiplicative=equalize_multiplicative,
                     multiplicative_percentile=multiplicative_percentile,
                     equalize_global=equalize_global, max_mem_mb=max_mem_mb,
-                    callback=callback)
+                    callback=callback, progress=total_progress,
+                    progress_step=progress_step)
                 total_progress += progress_step
+
+        del mask_files
+        gc.collect()
 
         if not return_headers:
             output.append(res)
