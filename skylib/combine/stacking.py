@@ -14,6 +14,7 @@ from tempfile import TemporaryFile
 
 import numpy as np
 from numpy import ma
+from scipy import stats
 import astropy.io.fits as pyfits
 
 from ..util.stats import chauvenet
@@ -48,6 +49,7 @@ def _calc_scaling(scaling: str, percentile: float,
     scaling_factors = np.zeros(n)
     for data_no, f in enumerate(input_data):
         data = f()
+        ofs = 0
         if scaling == 'average':
             avg = data.mean()
 
@@ -74,13 +76,21 @@ def _calc_scaling(scaling: str, percentile: float,
                 (data - min_val).clip(0, 2*0x10000 - 1)
                 .astype(np.int32))) + min_val
 
+        elif scaling == 'histogram':
+            # Approximate histogram peak and tail matching: subtract mode, then
+            # divide by average
+            if isinstance(data, ma.MaskedArray):
+                data = data.compressed()
+            else:
+                data = data.ravel()
+            ofs = -stats.mode(data)
+            avg = (data + ofs).mean()
+
         else:
             raise ValueError(
                 'Unknown scaling mode "{}"'.format(scaling))
 
-        if avg > 0:
-            ofs = 0
-        else:
+        if avg <= 0:
             # To make sure that all images are scaled by a positive
             # factor, add a constant offset to the image so that its
             # average = 1
@@ -625,7 +635,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
             "median": scale to match median;
             "percentile": match the given percentile (median for
               `scaling_percentile` = 50);
-            "mode": match modal values
+            "mode": match modal values;
+            "histogram": histogram peak and tail normalization
     :param scaling_percentile: percentile value for `scaling` = "percentile"
     :param prescaling: pre-rejection scaling mode (applied before rejection,
         does not normalize output, ignored if `rejection` = None); possible
