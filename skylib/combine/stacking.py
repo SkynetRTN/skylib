@@ -817,8 +817,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     if x is image_to_exclude:
                         del new_data[i], new_mask_files[i]
                         break
-                # Disable rejection during smart stacking; use the previously
-                # computed rejection masks stored in mask_files
+                # For the sake of speed, disable rejection and equalization
+                # during smart stacking; use the previously computed rejection
+                # masks stored in mask_files
                 new_data_getters = [
                     lambda *args, i=i, **kwargs:
                     get_data(new_data[i], hdu_no, *args, **kwargs)
@@ -843,11 +844,8 @@ def combine(input_data: List[Union[pyfits.HDUList,
                     prescaling_percentile=prescaling_percentile,
                     rejection=None, lo=lo, hi=hi, min_keep=min_keep,
                     propagate_mask=propagate_mask,
-                    equalize_additive=equalize_additive,
-                    equalize_order=equalize_order,
-                    equalize_multiplicative=equalize_multiplicative,
-                    multiplicative_percentile=multiplicative_percentile,
-                    equalize_global=equalize_global, max_mem_mb=max_mem_mb,
+                    equalize_additive=False, equalize_multiplicative=False,
+                    equalize_global=False, max_mem_mb=max_mem_mb,
                     callback=callback, progress=total_progress,
                     progress_step=progress_step)
                 del new_input_data, new_data_getters
@@ -861,8 +859,10 @@ def combine(input_data: List[Union[pyfits.HDUList,
                 del new_data, new_mask_files, new_res
                 gc.collect()
 
-            # Re-stack the final set of images with rejection enabled
-            if rejection:
+            # Re-stack the final set of images with all initially requested
+            # features enabled
+            if rejection or equalize_additive or equalize_multiplicative or \
+                    equalize_global:
                 res, rej_percent, _ = _do_combine(
                     [lambda *args, i=i, **kwargs:
                      get_data(final_data[i], hdu_no, *args, **kwargs)
