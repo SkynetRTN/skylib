@@ -83,7 +83,7 @@ def _calc_scaling(scaling: str, percentile: float,
                 data = data.compressed()
             else:
                 data = data.ravel()
-            ofs = -stats.mode(data)
+            ofs = -np.median(data)
             avg = (data + ofs).mean()
 
         else:
