@@ -295,7 +295,7 @@ def correct_cols_and_pixels(
                         break
 
                 if navg:
-                    output[row, col] = avg_data[:navg].mean()
+                    output[row, col] = np.median(avg_data[:navg])
                 else:
                     # Not enough data for averaging, leave as is
                     output[row, col] = img[row, col]
@@ -367,7 +367,7 @@ def correct_cols_and_pixels(
                     if r >= w or r >= h:
                         break
                 if navg:
-                    output[row, col] = avg_data[:navg].mean()
+                    output[row, col] = np.median(avg_data[:navg])
                 else:
                     # Not enough data for averaging, leave as is
                     output[row, col] = img[row, col]
