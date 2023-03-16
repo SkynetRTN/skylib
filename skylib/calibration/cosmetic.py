@@ -381,7 +381,7 @@ def correct_cols_and_pixels(
 def correct_cosmetic(
         img: np.ndarray, col_mask: Optional[np.ndarray] = None,
         pixel_mask: Optional[np.ndarray] = None, m_col: int = 10,
-        nu_col: int = 0, m_pixel: int = 2, nu_pixel: int = 4,
+        nu_col: int = 0, m_pixel: int = 2, nu_pixel: int = 2,
         m_corr_col: int = 2, m_corr_pixel: int = 1) -> np.ndarray:
     """
     Fully automatic and self-contained intra-image cosmetic correction pipeline
