@@ -412,11 +412,12 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                         img, [_x_], [_y_], _a_, _b_, _theta_, 1,
                         err=background_rms, mask=mask, gain=gain, subpix=0)
             else:
-                for i, (_x_, _y_, _a_, _b_, _theta_) in enumerate(zip(
-                        x, y, a, b, theta)):
+                for i, (_x_, _y_, _a_, _b_, _theta_, _a_in_, _a_out_) in \
+                        enumerate(zip(x, y, a, b, theta, a_in, a_out)):
                     flux[i], flux_err[i], flags[i] = sep.sum_ellipse(
                         img, [_x_], [_y_], _a_, _b_, _theta_, 1,
-                        mask=mask, bkgann=(a_in, a_out), gain=gain, subpix=0)
+                        mask=mask, bkgann=(_a_in_, _a_out_), gain=gain,
+                        subpix=0)
         elif have_background:
             flux, flux_err, flags = sep.sum_ellipse(
                 img, x, y, a, b, theta, 1, err=background_rms, mask=mask,
