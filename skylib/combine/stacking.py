@@ -1021,10 +1021,21 @@ def combine(input_data: List[Union[pyfits.HDUList,
         hdr['NCOMB'] = (len(final_data), 'Number of images used in combining')
         hdr['SMARTSTK'] = (str(smart_stacking), 'Smart stacking mode')
 
+        # Save component names; use either Afterglow Workbench filename
+        # if available or FITS filename otherwise
         for i, im in enumerate(final_data):
-            if isinstance(im, pyfits.HDUList) and im.filename():
-                hdr['IMG_{:04d}'.format(i)] = (
-                    os.path.basename(im.filename()), 'Component filename')
+            if isinstance(im, pyfits.HDUList):
+                try:
+                    name = im[hdu_no].header['AGFILNAM']
+                except KeyError:
+                    name = os.path.basename(im.filename())
+            else:
+                try:
+                    name = im[1]['AGFILNAM']
+                except KeyError:
+                    name = None
+            if name:
+                hdr['IMG_{:04d}'.format(i)] = (name, 'Component filename')
 
         output.append((res, hdr))
 
