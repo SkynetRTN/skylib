@@ -30,7 +30,7 @@ def _calc_scaling(scaling: str, percentile: float,
                   input_data: List[callable],
                   callback: Optional[callable] = None,
                   progress: float = 0, progress_step: float = 0) \
-        -> Tuple[np.ndarray, np.ndarray]:
+        -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Calculate scaling factors and offsets
 
@@ -41,7 +41,8 @@ def _calc_scaling(scaling: str, percentile: float,
     :param progress: overall progress at the beginning of the current step
     :param progress_step: fraction of overall progress for the current step
 
-    :return: offsets and scaling factors
+    :return: offsets, scaling factors, and global post-scaling offset
+        (pedestal)
     """
     n = len(input_data)
     offsets = np.zeros(n)
@@ -114,7 +115,13 @@ def _calc_scaling(scaling: str, percentile: float,
     scaling_factors[scaling_factors != 0] = k_ref / \
         scaling_factors[scaling_factors != 0]
 
-    return offsets, scaling_factors
+    if offsets.any():
+        pedestal = (-offsets[scaling_factors != 0] /
+                    scaling_factors[scaling_factors != 0]).max()
+    else:
+        pedestal = 0
+
+    return offsets, scaling_factors, pedestal
 
 
 def _apply_equalization(equalize_additive: bool, equalize_order: int,
@@ -325,7 +332,7 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
 
     # Calculate prescaling offsets and factors
     if prescaling:
-        prescaling_offsets, prescaling_factors = _calc_scaling(
+        prescaling_offsets, prescaling_factors, pedestal = _calc_scaling(
             prescaling, prescaling_percentile, input_data, callback, progress,
             progress_step)
         progress += progress_step
@@ -335,12 +342,12 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
     # Calculate scaling offsets and factors if we won't do rejection;
     # otherwise, do this after rejection
     if scaling and not rejection:
-        scaling_offsets, scaling_factors = _calc_scaling(
+        scaling_offsets, scaling_factors, pedestal = _calc_scaling(
             scaling, scaling_percentile, input_data, callback, progress,
             progress_step)
         progress += progress_step
     else:
-        scaling_offsets, scaling_factors = [], []
+        scaling_offsets, scaling_factors, pedestal = [], [], 0
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     bytes_per_pixel = max(f(start=0, end=1).itemsize for f in input_data) + 1
@@ -483,6 +490,8 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                         data += ofsi
                     if ki not in (0, 1):
                         data *= ki
+                    if pedestal:
+                        data += pedestal
 
             if isinstance(datacube, ma.MaskedArray):
                 if datacube.mask is None or not datacube.mask.any():
@@ -504,7 +513,7 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
 
     if scaling and rejection:
         # Restore the rejection mask and calculate offsets and scaling factors
-        scaling_offsets, scaling_factors = _calc_scaling(
+        scaling_offsets, scaling_factors, pedestal = _calc_scaling(
             scaling, scaling_percentile,
             [lambda i=i: _get_data_override_mask(
                 i, input_data, data_width, data_height, mask_files)
@@ -555,6 +564,8 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                     data += ofsi
                 if ki not in (0, 1):
                     data *= ki
+                if pedestal:
+                    data += pedestal
 
             # Equalize backgrounds
             if transformations:
@@ -900,8 +911,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
             continue
 
         # Update FITS headers, start from the first image
-        headers = [f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
-                   for f in final_data]
+        headers: List[pyfits.Header] = [
+            f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
+            for f in final_data]
         hdr = headers[0].copy(strip=True)
 
         exp_lengths = [
