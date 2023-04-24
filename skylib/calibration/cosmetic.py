@@ -32,7 +32,8 @@ __all__ = [
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
+def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
+        -> np.ndarray:
     """
     Flag pixels with outlying values within their [-m,m] horizontal vicinity
 
@@ -42,28 +43,66 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
         means infinity = Gaussian distribution, nu = 1 => Lorentzian
         distribution; also, `nu` = 2 and 4 are supported; for other values,
         CDF is not analytically invertible
+    :param z: number of binning iterations
 
     :return: mask image with 1-s corresponding to bad pixels
     """
-    mask = np.zeros(img.shape, np.bool8)
-
     h, w = img.shape
     s = min(2*m + 1, w)
-    for i in prange(h):
-        for j in range(w):
-            left = j - m
-            d = w - left - s
-            ofs = m
-            if left < 0:
-                ofs += left
-                left = 0
-            elif d < 0:
-                ofs -= d
-                left += d
-            if chauvenet(
-                    img[i, left:left+s], nu=nu, min_vals=2, mean_type=1,
-                    sigma_type=1, check_idx=ofs)[0][ofs]:
-                mask[i, j] = True
+    mask = np.zeros(img.shape, np.bool8)
+    if z > 1:
+        binned_img = img.copy()  # will modify binned image in place
+    else:
+        binned_img = img
+
+    for n in range(z):
+        if n:
+            # Bin the input array
+            for i in prange(h):
+                for j in range(w):
+                    x1 = binned_img[2*i, j]
+                    x2 = binned_img[2*i+1, j]
+                    if np.isfinite(x1):
+                        if np.isfinite(x2):
+                            binned_img[i, j] = (x1 + x2)/2
+                        else:
+                            binned_img[i, j] = x1
+                    elif np.isfinite(x2):
+                        binned_img[i, j] = x2
+                    else:
+                        binned_img[i, j] = np.nan
+
+        for i in prange(h):
+            for j in range(w):
+                if n and not np.isfinite(binned_img[i, j]):
+                    # No data for the current pixel, already masked at
+                    # the previous iterations
+                    continue
+
+                left = j - m
+                d = w - left - s
+                ofs = m
+                if left < 0:
+                    ofs += left
+                    left = 0
+                elif d < 0:
+                    ofs -= d
+                    left += d
+                if chauvenet(
+                        binned_img[i, left:left+s], nu=nu, min_vals=2,
+                        mean_type=1, sigma_type=1, check_idx=ofs)[0][ofs]:
+                    # Mask the whole binned pixel
+                    if z > 1:
+                        binned_img[i, j] = np.nan
+                    if n:
+                        r = 1 << n
+                        row = i*r
+                        for k in range(r):
+                            mask[row+k, j] = True
+                    else:
+                        mask[i, j] = True
+
+        h //= 2  # prepare to the next binning iteration
 
     return mask
 
@@ -231,10 +270,9 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
     :return: bad column and bad pixel masks that can be passed to
         :func:`correct_cols_and_pixels` or :func:`correct_cosmetic`
     """
-    if img.dtype.name == 'float32':
-        # Numba is slower for 32-bit floating point
+    if img.dtype.name != 'float64':
         img = img.astype(np.float64)
-    elif not img.dtype.isnative:
+    if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
 
@@ -405,10 +443,9 @@ def correct_cosmetic(
 
     :return: corrected image
     """
-    if img.dtype.name == 'float32':
-        # Numba is slower for 32-bit floating point
+    if img.dtype.name != 'float64':
         img = img.astype(np.float64)
-    elif not img.dtype.isnative:
+    if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
 
