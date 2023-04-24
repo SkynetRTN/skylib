@@ -250,7 +250,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
 
 
 def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
-                   m_pixel: int = 2, nu_pixel: int = 4) \
+                   z: int = 1, m_pixel: int = 2, nu_pixel: int = 4) \
         -> Tuple[np.ndarray, np.ndarray]:
     """
     Detect cosmetic defects (bad columns and isolated pixels) from the given
@@ -262,6 +262,7 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         bad column detection; `nu` = 0 means infinity = Gaussian distribution,
         nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
         for other values, CDF is not analytically invertible
+    :param z: number of binning iterations
     :param m_pixel: bad column proximity half-range for isolated bad pixel
         detection
     :param nu_pixel: number of degrees of freedom in Student's distribution for
@@ -276,7 +277,7 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
 
-    col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+    col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
     pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
 
     return col_mask, pixel_mask
@@ -419,7 +420,7 @@ def correct_cols_and_pixels(
 def correct_cosmetic(
         img: np.ndarray, col_mask: Optional[np.ndarray] = None,
         pixel_mask: Optional[np.ndarray] = None, m_col: int = 10,
-        nu_col: int = 0, m_pixel: int = 2, nu_pixel: int = 2,
+        nu_col: int = 0, z: int = 1, m_pixel: int = 2, nu_pixel: int = 2,
         m_corr_col: int = 2, m_corr_pixel: int = 1) -> np.ndarray:
     """
     Fully automatic and self-contained intra-image cosmetic correction pipeline
@@ -434,6 +435,7 @@ def correct_cosmetic(
         bad column detection; `nu` = 0 means infinity = Gaussian distribution,
         nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
         for other values, CDF is not analytically invertible
+    :param z: number of binning iterations
     :param m_pixel: bad column proximity half-range for isolated bad pixel
         detection
     :param nu_pixel: number of degrees of freedom in Student's distribution for
@@ -450,7 +452,7 @@ def correct_cosmetic(
         img = img.byteswap().newbyteorder()
 
     if col_mask is None:
-        col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+        col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
     else:
         if col_mask.shape != img.shape:
             raise ValueError(
