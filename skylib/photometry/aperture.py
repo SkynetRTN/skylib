@@ -8,8 +8,8 @@ of an image after source extraction.
 from typing import Optional, Union
 
 from numpy import (
-    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log10,
-    ndarray, ndim, ones, pi, sqrt, zeros)
+    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log,
+    log10, ndarray, ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 from scipy.optimize import minimize
@@ -568,7 +568,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
     good = (flux > 0).nonzero()
     if len(good[0]):
         sources['mag'][good] = -2.5*log10(flux[good]/texp)
-        sources['mag_err'][good] = 2.5*log10(1 + flux_err[good]/flux[good])
+        sources['mag_err'][good] = 2.5/log(10)*(flux_err[good]/flux[good])
 
     sources['aper_a'] = a
     sources['aper_b'] = b
