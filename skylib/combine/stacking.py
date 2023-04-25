@@ -30,7 +30,7 @@ def _calc_scaling(scaling: str, percentile: float,
                   input_data: List[callable],
                   callback: Optional[callable] = None,
                   progress: float = 0, progress_step: float = 0) \
-        -> Tuple[np.ndarray, np.ndarray, float]:
+        -> Tuple[np.ndarray, np.ndarray, float, float]:
     """
     Calculate scaling factors and offsets
 
@@ -41,8 +41,7 @@ def _calc_scaling(scaling: str, percentile: float,
     :param progress: overall progress at the beginning of the current step
     :param progress_step: fraction of overall progress for the current step
 
-    :return: offsets, scaling factors, and global post-scaling offset
-        (pedestal)
+    :return: offsets, scaling factors, and their averages
     """
     n = len(input_data)
     offsets = np.zeros(n)
@@ -115,13 +114,14 @@ def _calc_scaling(scaling: str, percentile: float,
     scaling_factors[scaling_factors != 0] = k_ref / \
         scaling_factors[scaling_factors != 0]
 
-    if offsets.any():
-        pedestal = (-offsets[scaling_factors != 0] /
-                    scaling_factors[scaling_factors != 0]).max()
+    # Calculate the average offset and scale to restore the final stack counts
+    inv_offset = -offsets.mean()
+    if scaling_factors.any():
+        inv_scaling_factor = (1/scaling_factors[scaling_factors != 0]).mean()
     else:
-        pedestal = 0
+        inv_scaling_factor = 1
 
-    return offsets, scaling_factors, pedestal
+    return offsets, scaling_factors, inv_offset, inv_scaling_factor
 
 
 def _apply_equalization(equalize_additive: bool, equalize_order: int,
@@ -332,23 +332,24 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
 
     # Calculate prescaling offsets and factors
     if prescaling:
-        prescaling_offsets, prescaling_factors, prescaling_pedestal = \
-            _calc_scaling(
-                prescaling, prescaling_percentile, input_data, callback,
-                progress, progress_step)
+        prescaling_offsets, prescaling_factors = _calc_scaling(
+            prescaling, prescaling_percentile, input_data, callback, progress,
+            progress_step)[:2]
         progress += progress_step
     else:
-        prescaling_offsets, prescaling_factors, prescaling_pedestal = [], [], 0
+        prescaling_offsets, prescaling_factors = [], []
 
     # Calculate scaling offsets and factors if we won't do rejection;
     # otherwise, do this after rejection
     if scaling and not rejection:
-        scaling_offsets, scaling_factors, pedestal = _calc_scaling(
-            scaling, scaling_percentile, input_data, callback, progress,
-            progress_step)
+        scaling_offsets, scaling_factors, inv_offset, inv_scaling_factor = \
+            _calc_scaling(
+                scaling, scaling_percentile, input_data, callback, progress,
+                progress_step)
         progress += progress_step
     else:
-        scaling_offsets, scaling_factors, pedestal = [], [], 0
+        scaling_offsets, scaling_factors = [], []
+        inv_offset, inv_scaling_factor = 0, 1
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     bytes_per_pixel = max(f(start=0, end=1).itemsize for f in input_data) + 1
@@ -386,8 +387,6 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                     data += ofsi
                 if ki not in (0, 1):
                     data *= ki
-                if prescaling_pedestal:
-                    data += prescaling_pedestal
                 datacube.append(data)
         else:
             datacube = unscaled_datacube
@@ -493,8 +492,6 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                         data += ofsi
                     if ki not in (0, 1):
                         data *= ki
-                    if pedestal:
-                        data += pedestal
 
             if isinstance(datacube, ma.MaskedArray):
                 if datacube.mask is None or not datacube.mask.any():
@@ -516,11 +513,12 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
 
     if scaling and rejection:
         # Restore the rejection mask and calculate offsets and scaling factors
-        scaling_offsets, scaling_factors, pedestal = _calc_scaling(
-            scaling, scaling_percentile,
-            [lambda i=i: _get_data_override_mask(
-                i, input_data, data_width, data_height, mask_files)
-             for i in range(n)], callback, progress, progress_step)
+        scaling_offsets, scaling_factors, inv_offset, inv_scaling_factor = \
+            _calc_scaling(
+                scaling, scaling_percentile,
+                [lambda i=i: _get_data_override_mask(
+                    i, input_data, data_width, data_height, mask_files)
+                 for i in range(n)], callback, progress, progress_step)
         progress += progress_step
 
         if equalize_additive or equalize_multiplicative:
@@ -567,8 +565,6 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
                     data += ofsi
                 if ki not in (0, 1):
                     data *= ki
-                if pedestal:
-                    data += pedestal
 
             # Equalize backgrounds
             if transformations:
@@ -607,6 +603,13 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
         # them that makes the resulting mosaic background as flat as possible
         # by fitting the model to the entire mosaic
         res = global_equalize(res, equalize_order)
+
+    # Rescale the stack back to the original counts to keep photometry errors
+    # correct
+    if inv_scaling_factor not in (0, 1):
+        res *= inv_scaling_factor
+    if inv_offset:
+        res += inv_offset
 
     return res, rej_percent, mask_files
 
