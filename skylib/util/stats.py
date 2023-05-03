@@ -112,8 +112,7 @@ def quantile(data: np.ndarray, q: float) -> float:
     return (data[i]*(i_minus - np.floor(i_minus)))*cf
 
 
-# TODO: Enable parallel mode for chauvenet() when Numba 0.57 is out
-@njit(nogil=True, cache=True)
+@njit(nogil=True, parallel=True, cache=True)
 def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
               nu: int = 0, min_vals: int = 10, mean_type: int = 0,
               mean_override: Optional[Union[np.ndarray, float, int]] = None,
