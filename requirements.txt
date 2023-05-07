@@ -10,4 +10,4 @@ photutils==1.7.0
 Pillow==9.5.0
 scipy==1.10.1
 sep==1.2.1
-tbb
+tbb==2021.9.0
