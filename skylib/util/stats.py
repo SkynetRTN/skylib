@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 
-@njit(nogil=True, parallel=True, cache=True)
+@njit(nogil=True, cache=True)
 def stddev1(data: np.ndarray, mask: Optional[np.ndarray]):
     """
     Numba implementation of standard deviation of a 1D masked array
@@ -30,7 +30,7 @@ def stddev1(data: np.ndarray, mask: Optional[np.ndarray]):
     """
     sigma: float = 0
     n: int = 0
-    for i in prange(data.shape[0]):
+    for i in range(data.shape[0]):
         if not mask[i]:
             sigma += data[i]**2
             n += 1
@@ -394,6 +394,7 @@ def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                 for j in range(data.shape[1]):
                     cdf[i, j] = 0.5*(1 + math.erf(t[i, j]))
         bad = goodmask.astype(np.int32)
+        bad = (goodmask & (n > min_vals) & (cdf > 1 - 0.25/n)).astype(np.int32)
         for j in prange(data.shape[1]):
             nj = n[j]
             if nj <= min_vals:
@@ -658,8 +659,9 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
     q += 1e-7
 
     return (chauvenet1, chauvenet2, chauvenet3)[ndim - 1](
-        data, mask, nu, min_vals, mean_type, mean_override, sigma_type,
-        sigma_override, clip_lo, clip_hi, max_iter, check_idx, q)
+        np.ascontiguousarray(data).astype(np.float64), mask, nu, min_vals,
+        mean_type, mean_override, sigma_type, sigma_override, clip_lo, clip_hi,
+        max_iter, check_idx, q)
 
 
 def weighted_quantile(data: Union[np.ndarray, Iterable],
