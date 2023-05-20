@@ -261,6 +261,8 @@ def histogram(data: Union[ndarray, MaskedArray],
     """
     if isinstance(data, MaskedArray):
         data = data.compressed()
+    else:
+        data = data.ravel()
 
     if data.size:
         min_bin = float(data.min(initial=None))
@@ -283,12 +285,8 @@ def histogram(data: Union[ndarray, MaskedArray],
             bins = floor((max_bin - min_bin) / bin_width)
 
         if isinstance(bins, int) and not (data % 1).any():
-            if max_bin - min_bin < 0x100:
-                # 8-bit integer data; use 256 bins maximum
-                bins = min(bins, 0x100)
-            elif max_bin - min_bin < 0x10000:
-                # 16-bit integer data; use 65536 bins maximum
-                bins = min(bins, 0x10000)
+            # Integer data; don't use more bins than there are values
+            bins = min(bins, int(max_bin - min_bin) + 1)
 
         if max_bin == min_bin:
             # Constant data, use unit bin size if the number of bins
