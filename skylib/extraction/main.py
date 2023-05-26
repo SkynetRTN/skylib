@@ -205,17 +205,20 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
         if h/downsample % 1:
             _img = _img[:height*downsample]
             _rms = _rms[:height*downsample]
-            _mask = _mask[:height*downsample]
+            if _mask is not None:
+                _mask = _mask[:height*downsample]
         if w/downsample % 1:
             _img = _img[:, :width*downsample]
             _rms = _rms[:, :width*downsample]
-            _mask = _mask[:, :width*downsample]
+            if _mask is not None:
+                _mask = _mask[:, :width*downsample]
         _img = (_img.reshape((height, downsample, width, downsample))
                 .sum(3).sum(1)/downsample**2).astype(_img.dtype)
         _rms = (_rms.reshape((height, downsample, width, downsample))
                 .sum(3).sum(1)/downsample**2).astype(_rms.dtype)
-        _mask = (_mask.reshape((height, downsample, width, downsample))
-                 .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
+        if _mask is not None:
+            _mask = (_mask.reshape((height, downsample, width, downsample))
+                     .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
 
     extract_kwargs = dict(
         err=_rms, mask=_mask, minarea=min_pixels, filter_kernel=filter_kernel,
