@@ -20,7 +20,7 @@ from typing import Optional, Tuple
 import numpy as np
 from numba import njit, prange
 
-from ..util.stats import chauvenet
+from ..util.stats import chauvenet1
 
 
 __all__ = [
@@ -88,7 +88,7 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
                 elif d < 0:
                     ofs -= d
                     left += d
-                if chauvenet(
+                if chauvenet1(
                         binned_img[i, left:left+s], nu=nu, min_vals=2,
                         mean_type=1, sigma_type=1, check_idx=ofs)[0][ofs]:
                     # Mask the whole binned pixel
@@ -126,7 +126,7 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
         for i in range(mask.shape[0]):
             if mask[i, j]:
                 nrej_all[j] += 1
-    col_mask, mu, sigma = chauvenet(
+    col_mask, mu, sigma = chauvenet1(
         nrej_all, mean_type=1, sigma_type=1, clip_lo=False, max_iter=1)
     flagged_col_indices = col_mask.nonzero()[0]
     n = len(flagged_col_indices)
@@ -241,7 +241,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             # Mark the pixel as bad if it's outlying compared to its non-masked
             # vicinity or if there are not enough non-masked pixels to make
             # a decision
-            if npixels < 3 or chauvenet(
+            if npixels < 3 or chauvenet1(
                     pixel_set[:npixels], nu=nu, mean_type=1, sigma_type=1,
                     min_vals=2, check_idx=0)[0][0]:
                 mask[row, col] = True
