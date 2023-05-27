@@ -55,6 +55,16 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
     else:
         binned_img = img
 
+    if nu == 1:
+        q = 0.5
+    elif nu == 2:
+        q = 0.577
+    elif nu == 4:
+        q = 0.626
+    else:
+        q = 0.683
+    q += 1e-7
+
     for n in range(z):
         if n:
             # Bin the input array
@@ -88,9 +98,13 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
                 elif d < 0:
                     ofs -= d
                     left += d
-                if chauvenet1(
-                        binned_img[i, left:left+s], nu=nu, min_vals=2,
-                        mean_type=1, sigma_type=1, check_idx=ofs)[0][ofs]:
+                rej = np.zeros(s, np.bool8)
+                chauvenet1(
+                    binned_img[i, left:left+s], rej, nu=nu, min_vals=2,
+                    mean_type=1, mean_override=None, sigma_type=1,
+                    sigma_override=None, clip_lo=True, clip_hi=True,
+                    max_iter=0, check_idx=ofs, q=q)
+                if rej[ofs]:
                     # Mask the whole binned pixel
                     if z > 1:
                         binned_img[i, j] = np.nan
@@ -126,8 +140,11 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
         for i in range(mask.shape[0]):
             if mask[i, j]:
                 nrej_all[j] += 1
-    col_mask, mu, sigma = chauvenet1(
-        nrej_all, mean_type=1, sigma_type=1, clip_lo=False, max_iter=1)
+    col_mask = np.zeros(nrej_all.shape, np.bool8)
+    mu, sigma = chauvenet1(
+        nrej_all, col_mask, nu=0, min_vals=10, mean_type=1, mean_override=None,
+        sigma_type=1, sigma_override=None, clip_lo=False, clip_hi=True,
+        max_iter=1, check_idx=None, q=0.6830001)[1:]
     flagged_col_indices = col_mask.nonzero()[0]
     n = len(flagged_col_indices)
     nrej = nrej_all[flagged_col_indices]
@@ -204,6 +221,16 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
                 break
     bad_col_indices = bad_cols.nonzero()[0]
 
+    if nu == 1:
+        q = 0.5
+    elif nu == 2:
+        q = 0.577
+    elif nu == 4:
+        q = 0.626
+    else:
+        q = 0.683
+    q += 1e-7
+
     h, w = img.shape
     mask = np.zeros_like(col_mask)
     for row in prange(h):
@@ -241,10 +268,16 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             # Mark the pixel as bad if it's outlying compared to its non-masked
             # vicinity or if there are not enough non-masked pixels to make
             # a decision
-            if npixels < 3 or chauvenet1(
-                    pixel_set[:npixels], nu=nu, mean_type=1, sigma_type=1,
-                    min_vals=2, check_idx=0)[0][0]:
+            if npixels < 3:
                 mask[row, col] = True
+            else:
+                rej = np.zeros(npixels, np.bool8)
+                chauvenet1(
+                    pixel_set[:npixels], rej, nu=nu, min_vals=2, mean_type=1,
+                    mean_override=None, sigma_type=1, sigma_override=None,
+                    clip_lo=True, clip_hi=True, max_iter=0, check_idx=0, q=q)
+                if rej[0]:
+                    mask[row, col] = True
 
     return mask
 
