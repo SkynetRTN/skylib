@@ -30,7 +30,7 @@ def _calc_scaling(scaling: str, percentile: float,
                   input_data: List[callable],
                   callback: Optional[callable] = None,
                   progress: float = 0, progress_step: float = 0) \
-        -> Tuple[np.ndarray, np.ndarray]:
+        -> Tuple[np.ndarray, np.ndarray, float, float]:
     """
     Calculate scaling factors and offsets
 
@@ -41,7 +41,7 @@ def _calc_scaling(scaling: str, percentile: float,
     :param progress: overall progress at the beginning of the current step
     :param progress_step: fraction of overall progress for the current step
 
-    :return: offsets and scaling factors
+    :return: offsets, scaling factors, and their averages
     """
     n = len(input_data)
     offsets = np.zeros(n)
@@ -114,7 +114,14 @@ def _calc_scaling(scaling: str, percentile: float,
     scaling_factors[scaling_factors != 0] = k_ref / \
         scaling_factors[scaling_factors != 0]
 
-    return offsets, scaling_factors
+    # Calculate the average offset and scale to restore the final stack counts
+    inv_offset = -offsets.mean()
+    if scaling_factors.any():
+        inv_scaling_factor = (1/scaling_factors[scaling_factors != 0]).mean()
+    else:
+        inv_scaling_factor = 1
+
+    return offsets, scaling_factors, inv_offset, inv_scaling_factor
 
 
 def _apply_equalization(equalize_additive: bool, equalize_order: int,
@@ -327,7 +334,7 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
     if prescaling:
         prescaling_offsets, prescaling_factors = _calc_scaling(
             prescaling, prescaling_percentile, input_data, callback, progress,
-            progress_step)
+            progress_step)[:2]
         progress += progress_step
     else:
         prescaling_offsets, prescaling_factors = [], []
@@ -335,12 +342,14 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
     # Calculate scaling offsets and factors if we won't do rejection;
     # otherwise, do this after rejection
     if scaling and not rejection:
-        scaling_offsets, scaling_factors = _calc_scaling(
-            scaling, scaling_percentile, input_data, callback, progress,
-            progress_step)
+        scaling_offsets, scaling_factors, inv_offset, inv_scaling_factor = \
+            _calc_scaling(
+                scaling, scaling_percentile, input_data, callback, progress,
+                progress_step)
         progress += progress_step
     else:
         scaling_offsets, scaling_factors = [], []
+        inv_offset, inv_scaling_factor = 0, 1
 
     # Process data in chunks to fit in the maximum amount of RAM allowed
     bytes_per_pixel = max(f(start=0, end=1).itemsize for f in input_data) + 1
@@ -504,11 +513,12 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
 
     if scaling and rejection:
         # Restore the rejection mask and calculate offsets and scaling factors
-        scaling_offsets, scaling_factors = _calc_scaling(
-            scaling, scaling_percentile,
-            [lambda i=i: _get_data_override_mask(
-                i, input_data, data_width, data_height, mask_files)
-             for i in range(n)], callback, progress, progress_step)
+        scaling_offsets, scaling_factors, inv_offset, inv_scaling_factor = \
+            _calc_scaling(
+                scaling, scaling_percentile,
+                [lambda i=i: _get_data_override_mask(
+                    i, input_data, data_width, data_height, mask_files)
+                 for i in range(n)], callback, progress, progress_step)
         progress += progress_step
 
         if equalize_additive or equalize_multiplicative:
@@ -593,6 +603,13 @@ def _do_combine(input_data: List[callable], data_width: int, data_height: int,
         # them that makes the resulting mosaic background as flat as possible
         # by fitting the model to the entire mosaic
         res = global_equalize(res, equalize_order)
+
+    # Rescale the stack back to the original counts to keep photometry errors
+    # correct
+    if inv_scaling_factor not in (0, 1):
+        res *= inv_scaling_factor
+    if inv_offset:
+        res += inv_offset
 
     return res, rej_percent, mask_files
 
@@ -900,8 +917,9 @@ def combine(input_data: List[Union[pyfits.HDUList,
             continue
 
         # Update FITS headers, start from the first image
-        headers = [f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
-                   for f in final_data]
+        headers: List[pyfits.Header] = [
+            f[hdu_no].header if isinstance(f, pyfits.HDUList) else f[1]
+            for f in final_data]
         hdr = headers[0].copy(strip=True)
 
         exp_lengths = [
@@ -1006,10 +1024,21 @@ def combine(input_data: List[Union[pyfits.HDUList,
         hdr['NCOMB'] = (len(final_data), 'Number of images used in combining')
         hdr['SMARTSTK'] = (str(smart_stacking), 'Smart stacking mode')
 
+        # Save component names; use either Afterglow Workbench filename
+        # if available or FITS filename otherwise
         for i, im in enumerate(final_data):
-            if isinstance(im, pyfits.HDUList) and im.filename():
-                hdr['IMG_{:04d}'.format(i)] = (
-                    os.path.basename(im.filename()), 'Component filename')
+            if isinstance(im, pyfits.HDUList):
+                try:
+                    name = im[hdu_no].header['AGFILNAM']
+                except KeyError:
+                    name = os.path.basename(im.filename())
+            else:
+                try:
+                    name = im[1]['AGFILNAM']
+                except KeyError:
+                    name = None
+            if name:
+                hdr['IMG_{:04d}'.format(i)] = (name, 'Component filename')
 
         output.append((res, hdr))
 

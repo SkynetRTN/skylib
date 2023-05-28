@@ -5,8 +5,6 @@ High-level source extraction interface.
 source extraction functions.
 """
 
-from __future__ import absolute_import, division, print_function
-
 from typing import Any, Dict, Optional, Tuple, Union
 
 from numpy import (
@@ -14,6 +12,7 @@ from numpy import (
     isfinite, ndarray, pi, sqrt, zeros)
 from numpy.ma import MaskedArray
 from numpy.lib.recfunctions import append_fields
+from scipy.ndimage import gaussian_filter
 from astropy.stats import gaussian_fwhm_to_sigma, gaussian_sigma_to_fwhm
 from astropy.convolution import Gaussian2DKernel, Kernel2D
 from astropy.modeling.models import Gaussian2D
@@ -63,7 +62,8 @@ class AsymmetricGaussian2DKernel(Gaussian2DKernel):
         self._truncation = abs(1 - self._array.sum())
 
 
-def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
+def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
+                    threshold: float = 2.5,
                     bkg_kw: Optional[Dict[str, Any]] = None, fwhm: float = 2.0,
                     ratio: float = 1, theta: float = 0, min_pixels: int = 5,
                     min_fwhm: float = 0.8, max_fwhm: float = 10,
@@ -83,6 +83,8 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
     :func:`skylib.calibration.background.estimate_background`.
 
     :param img: input 2D image array
+    :param downsample: downsample input by the given factor to improve
+        the reliability
     :param threshold: detection threshold in units of background RMS
     :param bkg_kw: optional keyword arguments to
         `~skylib.calibration.background.estimate_background()`
@@ -156,7 +158,7 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
 
     # Obtain filter kernel
     if fwhm:
-        sigma = fwhm*gaussian_fwhm_to_sigma
+        sigma = fwhm*gaussian_fwhm_to_sigma/downsample
         if ratio == 1:
             # Symmetric Gaussian kernel
             filter_kernel = Gaussian2DKernel(sigma)
@@ -186,18 +188,61 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
         _rms = rms.data
     else:
         _rms = rms
-    sources, seg_img = sep.extract(
-        _img, threshold, err=_rms, mask=_mask, minarea=min_pixels,
-        filter_kernel=filter_kernel, deblend_nthresh=deblend_levels,
-        deblend_cont=deblend_contrast if deblend else 1.0,
-        clean=bool(clean), clean_param=clean, segmentation_map=True)
+
+    # Downsample the image
+    if downsample > 1:
+        # Adjust extraction parameters
+        min_pixels //= downsample**2
+
+        # Before extraction, prefilter using Gaussian blur with sigma equal to
+        # downsampling factor
+        _img = gaussian_filter(_img.astype(float32), sigma=downsample)
+
+        # Rebin image and RMS map
+        h, w = _img.shape
+        width = w//downsample
+        height = h//downsample
+        if h/downsample % 1:
+            _img = _img[:height*downsample]
+            _rms = _rms[:height*downsample]
+            if _mask is not None:
+                _mask = _mask[:height*downsample]
+        if w/downsample % 1:
+            _img = _img[:, :width*downsample]
+            _rms = _rms[:, :width*downsample]
+            if _mask is not None:
+                _mask = _mask[:, :width*downsample]
+        _img = (_img.reshape((height, downsample, width, downsample))
+                .sum(3).sum(1)/downsample**2).astype(_img.dtype)
+        _rms = (_rms.reshape((height, downsample, width, downsample))
+                .sum(3).sum(1)/downsample**2).astype(_rms.dtype)
+        if _mask is not None:
+            _mask = (_mask.reshape((height, downsample, width, downsample))
+                     .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
+
+    extract_kwargs = dict(
+        err=_rms, mask=_mask, minarea=min_pixels, filter_kernel=filter_kernel,
+        deblend_nthresh=deblend_levels,
+        deblend_cont=deblend_contrast if deblend else 1.0, clean=bool(clean),
+        clean_param=clean,
+    )
+    if sat_img is not None:
+        sources, seg_img = sep.extract(
+            _img, threshold, segmentation_map=True, **extract_kwargs)
+    else:
+        sources = sep.extract(_img, threshold, **extract_kwargs)
+        seg_img = None
+    del _img, _rms, _mask
 
     sources = append_fields(
         sources, 'saturated', zeros(len(sources), int), usemask=False)
-    if sat_img is not None:
+    if seg_img is not None:
         # Count saturated pixels
-        for y, x in zip(*(seg_img.astype(bool) & sat_img).nonzero()):
-            sources[seg_img[y, x] - 1]['saturated'] += 1
+        for y, x in zip(*sat_img.nonzero()):
+            i = seg_img[y//downsample, x//downsample]
+            if i:
+                sources[i - 1]['saturated'] += 1
+        del seg_img
 
     # Exclude sources that couldn't be measured
     sources = sources[isfinite(sources['x']) & isfinite(sources['y']) &
@@ -205,6 +250,13 @@ def extract_sources(img: Union[ndarray, MaskedArray], threshold: float = 2.5,
                       isfinite(sources['theta']) & isfinite(sources['flux'])]
     sources = sources[(sources['a'] > 0) & (sources['b'] > 0) &
                       (sources['flux'] > 0)]
+
+    if downsample > 1:
+        # Rescale coordinates and sizes back
+        sources['x'] *= downsample
+        sources['y'] *= downsample
+        sources['a'] *= downsample
+        sources['b'] *= downsample
 
     # Discard saturated sources if requested
     if sat_img is not None and discard_saturated > 0:
@@ -261,6 +313,8 @@ def histogram(data: Union[ndarray, MaskedArray],
     """
     if isinstance(data, MaskedArray):
         data = data.compressed()
+    else:
+        data = data.ravel()
 
     if data.size:
         min_bin = float(data.min(initial=None))
@@ -283,12 +337,8 @@ def histogram(data: Union[ndarray, MaskedArray],
             bins = floor((max_bin - min_bin) / bin_width)
 
         if isinstance(bins, int) and not (data % 1).any():
-            if max_bin - min_bin < 0x100:
-                # 8-bit integer data; use 256 bins maximum
-                bins = min(bins, 0x100)
-            elif max_bin - min_bin < 0x10000:
-                # 16-bit integer data; use 65536 bins maximum
-                bins = min(bins, 0x10000)
+            # Integer data; don't use more bins than there are values
+            bins = min(bins, int(max_bin - min_bin) + 1)
 
         if max_bin == min_bin:
             # Constant data, use unit bin size if the number of bins

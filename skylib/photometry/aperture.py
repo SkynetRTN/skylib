@@ -8,8 +8,8 @@ of an image after source extraction.
 from typing import Optional, Union
 
 from numpy import (
-    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log10,
-    ndarray, ndim, ones, pi, sqrt, zeros)
+    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log,
+    log10, ndarray, ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 from scipy.optimize import minimize

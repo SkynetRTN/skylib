@@ -20,7 +20,7 @@ from typing import Optional, Tuple
 import numpy as np
 from numba import njit, prange
 
-from ..util.stats import chauvenet
+from ..util.stats import chauvenet1
 
 
 __all__ = [
@@ -32,7 +32,8 @@ __all__ = [
 
 
 @njit(nogil=True, parallel=True, cache=True)
-def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
+def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
+        -> np.ndarray:
     """
     Flag pixels with outlying values within their [-m,m] horizontal vicinity
 
@@ -42,28 +43,80 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0) -> np.ndarray:
         means infinity = Gaussian distribution, nu = 1 => Lorentzian
         distribution; also, `nu` = 2 and 4 are supported; for other values,
         CDF is not analytically invertible
+    :param z: number of binning iterations
 
     :return: mask image with 1-s corresponding to bad pixels
     """
-    mask = np.zeros(img.shape, np.bool8)
-
     h, w = img.shape
     s = min(2*m + 1, w)
-    for i in prange(h):
-        for j in range(w):
-            left = j - m
-            d = w - left - s
-            ofs = m
-            if left < 0:
-                ofs += left
-                left = 0
-            elif d < 0:
-                ofs -= d
-                left += d
-            if chauvenet(
-                    img[i, left:left+s], nu=nu, min_vals=2, mean_type=1,
-                    sigma_type=1, check_idx=ofs)[0][ofs]:
-                mask[i, j] = True
+    mask = np.zeros(img.shape, np.bool8)
+    if z > 1:
+        binned_img = img.copy()  # will modify binned image in place
+    else:
+        binned_img = img
+
+    if nu == 1:
+        q = 0.5
+    elif nu == 2:
+        q = 0.577
+    elif nu == 4:
+        q = 0.626
+    else:
+        q = 0.683
+    q += 1e-7
+
+    for n in range(z):
+        if n:
+            # Bin the input array
+            for i in prange(h):
+                for j in range(w):
+                    x1 = binned_img[2*i, j]
+                    x2 = binned_img[2*i+1, j]
+                    if np.isfinite(x1):
+                        if np.isfinite(x2):
+                            binned_img[i, j] = (x1 + x2)/2
+                        else:
+                            binned_img[i, j] = x1
+                    elif np.isfinite(x2):
+                        binned_img[i, j] = x2
+                    else:
+                        binned_img[i, j] = np.nan
+
+        for i in prange(h):
+            for j in range(w):
+                if n and not np.isfinite(binned_img[i, j]):
+                    # No data for the current pixel, already masked at
+                    # the previous iterations
+                    continue
+
+                left = j - m
+                d = w - left - s
+                ofs = m
+                if left < 0:
+                    ofs += left
+                    left = 0
+                elif d < 0:
+                    ofs -= d
+                    left += d
+                rej = np.zeros(s, np.bool8)
+                chauvenet1(
+                    binned_img[i, left:left+s], rej, nu=nu, min_vals=2,
+                    mean_type=1, mean_override=None, sigma_type=1,
+                    sigma_override=None, clip_lo=True, clip_hi=True,
+                    max_iter=0, check_idx=ofs, q=q)
+                if rej[ofs]:
+                    # Mask the whole binned pixel
+                    if z > 1:
+                        binned_img[i, j] = np.nan
+                    if n:
+                        r = 1 << n
+                        row = i*r
+                        for k in range(r):
+                            mask[row+k, j] = True
+                    else:
+                        mask[i, j] = True
+
+        h //= 2  # prepare to the next binning iteration
 
     return mask
 
@@ -87,8 +140,11 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
         for i in range(mask.shape[0]):
             if mask[i, j]:
                 nrej_all[j] += 1
-    col_mask, mu, sigma = chauvenet(
-        nrej_all, mean_type=1, sigma_type=1, clip_lo=False, max_iter=1)
+    col_mask = np.zeros(nrej_all.shape, np.bool8)
+    mu, sigma = chauvenet1(
+        nrej_all, col_mask, nu=0, min_vals=10, mean_type=1, mean_override=None,
+        sigma_type=1, sigma_override=None, clip_lo=False, clip_hi=True,
+        max_iter=1, check_idx=None, q=0.6830001)[1:]
     flagged_col_indices = col_mask.nonzero()[0]
     n = len(flagged_col_indices)
     nrej = nrej_all[flagged_col_indices]
@@ -139,7 +195,7 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
-@njit(nogil=True, parallel=True, cache=True)
+@njit(nogil=True, cache=True)
 def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
                 nu: int = 4) -> np.ndarray:
     """
@@ -165,6 +221,19 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
                 break
     bad_col_indices = bad_cols.nonzero()[0]
 
+    if nu == 1:
+        q = 0.5
+    elif nu == 2:
+        q = 0.577
+    elif nu == 4:
+        q = 0.626
+    else:
+        q = 0.683
+    q += 1e-7
+
+    pixel_set = np.empty((2*m + 1)**2, img.dtype)
+    rej = np.zeros(pixel_set.shape, np.bool8)
+
     h, w = img.shape
     mask = np.zeros_like(col_mask)
     for row in prange(h):
@@ -175,7 +244,6 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
 
             # Extract (2*m + 1)x(2*m + 1) vicinity of the pixel not belonging
             # to bad columns
-            pixel_set = np.empty((2*m + 1)**2, img.dtype)
             pixel_set[0] = img[row, col]
             npixels = 1
             for j in range(max(col - m, 0), min(col + m + 1, w)):
@@ -202,16 +270,23 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             # Mark the pixel as bad if it's outlying compared to its non-masked
             # vicinity or if there are not enough non-masked pixels to make
             # a decision
-            if npixels < 3 or chauvenet(
-                    pixel_set[:npixels], nu=nu, mean_type=1, sigma_type=1,
-                    min_vals=2, check_idx=0)[0][0]:
+            if npixels < 3:
                 mask[row, col] = True
+            else:
+                rej[:npixels] = False
+                chauvenet1(
+                    pixel_set[:npixels], rej[:npixels], nu=nu, min_vals=2,
+                    mean_type=1, mean_override=None, sigma_type=1,
+                    sigma_override=None, clip_lo=True, clip_hi=True,
+                    max_iter=0, check_idx=0, q=q)
+                if rej[0]:
+                    mask[row, col] = True
 
     return mask
 
 
 def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
-                   m_pixel: int = 2, nu_pixel: int = 4) \
+                   z: int = 1, m_pixel: int = 2, nu_pixel: int = 4) \
         -> Tuple[np.ndarray, np.ndarray]:
     """
     Detect cosmetic defects (bad columns and isolated pixels) from the given
@@ -223,6 +298,7 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         bad column detection; `nu` = 0 means infinity = Gaussian distribution,
         nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
         for other values, CDF is not analytically invertible
+    :param z: number of binning iterations
     :param m_pixel: bad column proximity half-range for isolated bad pixel
         detection
     :param nu_pixel: number of degrees of freedom in Student's distribution for
@@ -231,14 +307,13 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
     :return: bad column and bad pixel masks that can be passed to
         :func:`correct_cols_and_pixels` or :func:`correct_cosmetic`
     """
-    if img.dtype.name == 'float32':
-        # Numba is slower for 32-bit floating point
+    if img.dtype.name != 'float64':
         img = img.astype(np.float64)
-    elif not img.dtype.isnative:
+    if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
 
-    col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+    col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
     pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
 
     return col_mask, pixel_mask
@@ -381,7 +456,7 @@ def correct_cols_and_pixels(
 def correct_cosmetic(
         img: np.ndarray, col_mask: Optional[np.ndarray] = None,
         pixel_mask: Optional[np.ndarray] = None, m_col: int = 10,
-        nu_col: int = 0, m_pixel: int = 2, nu_pixel: int = 2,
+        nu_col: int = 0, z: int = 1, m_pixel: int = 2, nu_pixel: int = 2,
         m_corr_col: int = 2, m_corr_pixel: int = 1) -> np.ndarray:
     """
     Fully automatic and self-contained intra-image cosmetic correction pipeline
@@ -396,6 +471,7 @@ def correct_cosmetic(
         bad column detection; `nu` = 0 means infinity = Gaussian distribution,
         nu = 1 => Lorentzian distribution; also, `nu` = 2 and 4 are supported;
         for other values, CDF is not analytically invertible
+    :param z: number of binning iterations
     :param m_pixel: bad column proximity half-range for isolated bad pixel
         detection
     :param nu_pixel: number of degrees of freedom in Student's distribution for
@@ -405,15 +481,14 @@ def correct_cosmetic(
 
     :return: corrected image
     """
-    if img.dtype.name == 'float32':
-        # Numba is slower for 32-bit floating point
+    if img.dtype.name != 'float64':
         img = img.astype(np.float64)
-    elif not img.dtype.isnative:
+    if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
         img = img.byteswap().newbyteorder()
 
     if col_mask is None:
-        col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col))
+        col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
     else:
         if col_mask.shape != img.shape:
             raise ValueError(
