@@ -1,12 +1,12 @@
 astroscrappy==1.1.0
-astropy==5.2.2
+astropy==5.3
 astroquery==0.4.6
 llvmlite==0.40.0
 matplotlib==3.7.1
 numba==0.57.0
 numpy==1.24.3
 opencv-contrib-python==4.7.0.72
-photutils==1.7.0
+photutils==1.8.0
 Pillow==9.5.0
 scipy==1.10.1
 sep==1.2.1
