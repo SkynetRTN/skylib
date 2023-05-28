@@ -14,6 +14,8 @@ from numba import njit, prange
 __all__ = [
     'chauvenet', 'weighted_median', 'weighted_quantile',
     'stddev1', 'stddev2', 'stddev3',
+    'chauvenet1', 'chauvenet1_parallel', 'chauvenet2', 'chauvenet2_parallel',
+    'chauvenet3', 'chauvenet3_parallel',
 ]
 
 
@@ -162,7 +164,6 @@ def ng_cdf(t: np.ndarray, nu: int) -> np.ndarray:
     return 0.5 + 0.375*np.sqrt(d)*(1 - d/12)
 
 
-@njit(nogil=True, parallel=True, cache=True)
 def chauvenet1(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                mean_type: int,
                mean_override: Optional[Union[np.ndarray, float, int]],
@@ -279,7 +280,10 @@ def chauvenet1(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
-@njit(nogil=True, parallel=True, cache=True)
+chauvenet1_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet1)
+chauvenet1 = njit(nogil=True, cache=True)(chauvenet1)
+
+
 def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                mean_type: int,
                mean_override: Optional[Union[np.ndarray, float, int]],
@@ -393,7 +397,6 @@ def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
             for i in prange(n_tot):
                 for j in range(data.shape[1]):
                     cdf[i, j] = 0.5*(1 + math.erf(t[i, j]))
-        bad = goodmask.astype(np.int32)
         bad = (goodmask & (n > min_vals) & (cdf > 1 - 0.25/n)).astype(np.int32)
         for j in prange(data.shape[1]):
             nj = n[j]
@@ -426,7 +429,10 @@ def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
-@njit(nogil=True, parallel=True, cache=True)
+chauvenet2_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet2)
+chauvenet2 = njit(nogil=True, cache=True)(chauvenet2)
+
+
 def chauvenet3(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                mean_type: int,
                mean_override: Optional[Union[np.ndarray, float, int]],
@@ -586,6 +592,10 @@ def chauvenet3(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
+chauvenet3_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet3)
+chauvenet3 = njit(nogil=True, cache=True)(chauvenet3)
+
+
 def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
               nu: int = 0, min_vals: int = 10, mean_type: int = 0,
               mean_override: Optional[Union[np.ndarray, float, int]] = None,
@@ -658,7 +668,8 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
     # Decrease the probability that Nq is a whole number
     q += 1e-7
 
-    return (chauvenet1, chauvenet2, chauvenet3)[ndim - 1](
+    return (chauvenet1_parallel, chauvenet2_parallel,
+            chauvenet3_parallel)[ndim - 1](
         np.ascontiguousarray(data).astype(np.float64), mask, nu, min_vals,
         mean_type, mean_override, sigma_type, sigma_override, clip_lo, clip_hi,
         max_iter, check_idx, q)
