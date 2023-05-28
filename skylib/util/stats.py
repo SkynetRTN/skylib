@@ -164,13 +164,13 @@ def ng_cdf(t: np.ndarray, nu: int) -> np.ndarray:
     return 0.5 + 0.375*np.sqrt(d)*(1 - d/12)
 
 
-def chauvenet1(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
-               mean_type: int,
-               mean_override: Optional[Union[np.ndarray, float, int]],
-               sigma_type: int,
-               sigma_override: Optional[Union[np.ndarray, float, int]],
-               clip_lo: bool, clip_hi: bool, max_iter: int,
-               check_idx: Optional[int], q: float) \
+def chauvenet1py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
+                 mean_type: int,
+                 mean_override: Optional[Union[np.ndarray, float, int]],
+                 sigma_type: int,
+                 sigma_override: Optional[Union[np.ndarray, float, int]],
+                 clip_lo: bool, clip_hi: bool, max_iter: int,
+                 check_idx: Optional[int], q: float) \
         -> Tuple[np.ndarray, float, float]:
     """
     Numba-accelerated implementation of Chauvenet rejection for 1D data
@@ -280,17 +280,17 @@ def chauvenet1(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
-chauvenet1_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet1)
-chauvenet1 = njit(nogil=True, cache=True)(chauvenet1)
+chauvenet1_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet1py)
+chauvenet1 = njit(nogil=True, cache=True)(chauvenet1py)
 
 
-def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
-               mean_type: int,
-               mean_override: Optional[Union[np.ndarray, float, int]],
-               sigma_type: int,
-               sigma_override: Optional[Union[np.ndarray, float, int]],
-               clip_lo: bool, clip_hi: bool, max_iter: int,
-               check_idx: Optional[Tuple[int, int]], q: float) \
+def chauvenet2py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
+                 mean_type: int,
+                 mean_override: Optional[Union[np.ndarray, float, int]],
+                 sigma_type: int,
+                 sigma_override: Optional[Union[np.ndarray, float, int]],
+                 clip_lo: bool, clip_hi: bool, max_iter: int,
+                 check_idx: Optional[Tuple[int, int]], q: float) \
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Numba-accelerated implementation of Chauvenet rejection for 2D data
@@ -429,17 +429,17 @@ def chauvenet2(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
-chauvenet2_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet2)
-chauvenet2 = njit(nogil=True, cache=True)(chauvenet2)
+chauvenet2_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet2py)
+chauvenet2 = njit(nogil=True, cache=True)(chauvenet2py)
 
 
-def chauvenet3(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
-               mean_type: int,
-               mean_override: Optional[Union[np.ndarray, float, int]],
-               sigma_type: int,
-               sigma_override: Optional[Union[np.ndarray, float, int]],
-               clip_lo: bool, clip_hi: bool, max_iter: int,
-               check_idx: Optional[Tuple[int, int, int]], q: float) \
+def chauvenet3py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
+                 mean_type: int,
+                 mean_override: Optional[Union[np.ndarray, float, int]],
+                 sigma_type: int,
+                 sigma_override: Optional[Union[np.ndarray, float, int]],
+                 clip_lo: bool, clip_hi: bool, max_iter: int,
+                 check_idx: Optional[Tuple[int, int, int]], q: float) \
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Numba-accelerated implementation of Chauvenet rejection for 3D data
@@ -592,8 +592,8 @@ def chauvenet3(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     return mask, mu, gamma
 
 
-chauvenet3_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet3)
-chauvenet3 = njit(nogil=True, cache=True)(chauvenet3)
+chauvenet3_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet3py)
+chauvenet3 = njit(nogil=True, cache=True)(chauvenet3py)
 
 
 def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
