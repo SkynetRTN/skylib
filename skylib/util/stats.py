@@ -143,7 +143,7 @@ def quantile(data: np.ndarray, q: float) -> float:
     return (data[i]*(i_minus - np.floor(i_minus)))*cf
 
 
-@njit(nogil=True, parallel=True, cache=True)
+@njit(nogil=True, cache=True)
 def ng_cdf(t: np.ndarray, nu: int) -> np.ndarray:
     """
     Return CDF for the given normalized array of residuals for non-Gaussian nu

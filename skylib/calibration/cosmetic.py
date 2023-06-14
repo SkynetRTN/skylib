@@ -195,7 +195,7 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
-@njit(nogil=True, cache=True)
+@njit(nogil=True, parallel=True, cache=True)
 def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
                 nu: int = 4) -> np.ndarray:
     """
@@ -214,7 +214,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
     """
     # Get indices of columns containing at least one flagged pixel
     bad_cols = np.zeros(col_mask.shape[1], np.bool8)
-    for j in range(col_mask.shape[1]):
+    for j in prange(col_mask.shape[1]):
         for i in range(col_mask.shape[0]):
             if col_mask[i, j]:
                 bad_cols[j] = True
@@ -231,9 +231,6 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
         q = 0.683
     q += 1e-7
 
-    pixel_set = np.empty((2*m + 1)**2, img.dtype)
-    rej = np.zeros(pixel_set.shape, np.bool8)
-
     h, w = img.shape
     mask = np.zeros_like(col_mask)
     for row in prange(h):
@@ -244,6 +241,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
 
             # Extract (2*m + 1)x(2*m + 1) vicinity of the pixel not belonging
             # to bad columns
+            pixel_set = np.empty((2*m + 1)**2, img.dtype)
             pixel_set[0] = img[row, col]
             npixels = 1
             for j in range(max(col - m, 0), min(col + m + 1, w)):
@@ -273,13 +271,12 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             if npixels < 3:
                 mask[row, col] = True
             else:
-                rej[:npixels] = False
-                chauvenet1(
-                    pixel_set[:npixels], rej[:npixels], nu=nu, min_vals=2,
-                    mean_type=1, mean_override=None, sigma_type=1,
-                    sigma_override=None, clip_lo=True, clip_hi=True,
-                    max_iter=0, check_idx=0, q=q)
-                if rej[0]:
+                rej = np.zeros(npixels, np.bool8)
+                if chauvenet1(
+                        pixel_set[:npixels], rej, nu=nu, min_vals=2,
+                        mean_type=1, mean_override=None, sigma_type=1,
+                        sigma_override=None, clip_lo=True, clip_hi=True,
+                        max_iter=0, check_idx=0, q=q)[0][0]:
                     mask[row, col] = True
 
     return mask
