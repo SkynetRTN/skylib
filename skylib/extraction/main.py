@@ -207,11 +207,15 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
             _rms = _rms[:height*downsample]
             if _mask is not None:
                 _mask = _mask[:height*downsample]
+            if sat_img is not None:
+                sat_img = sat_img[:height*downsample]
         if w/downsample % 1:
             _img = _img[:, :width*downsample]
             _rms = _rms[:, :width*downsample]
             if _mask is not None:
                 _mask = _mask[:, :width*downsample]
+            if sat_img is not None:
+                sat_img = sat_img[:, :width*downsample]
         _img = (_img.reshape((height, downsample, width, downsample))
                 .sum(3).sum(1)/downsample**2).astype(_img.dtype)
         _rms = (_rms.reshape((height, downsample, width, downsample))
@@ -221,7 +225,7 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
                      .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
         if sat_img is not None:
             sat_img = (sat_img.reshape((height, downsample, width, downsample))
-                       .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
+                       .sum(3).sum(1)/downsample**2).astype(sat_img.dtype)
 
     extract_kwargs = dict(
         err=_rms, mask=_mask, minarea=min_pixels, filter_kernel=filter_kernel,
