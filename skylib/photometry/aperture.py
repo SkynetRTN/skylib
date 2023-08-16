@@ -8,8 +8,7 @@ of an image after source extraction.
 from typing import Optional, Union
 
 from numpy import (
-    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log,
-    log10, ndarray, ndim, ones, pi, sqrt, zeros)
+    arctan, argsort, array, empty, full_like, indices, int32, isscalar, log10, ndarray, ndim, ones, pi, sqrt, zeros)
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 from scipy.optimize import minimize
@@ -147,8 +146,16 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         k = 0  # temporary fix for k = 0 not being allowed in AgA
     if k_in:
         k_in = float(k_in)
+    elif k:
+        k_in = 1.5*k
+    else:
+        k_in = 3.75
     if k_out:
         k_out = float(k_out)
+    elif k:
+        k_out = 2*k
+    else:
+        k_out = 5
 
     x, y = sources['x'] - 1, sources['y'] - 1
     area_img = ones(img.shape, dtype=int32)
@@ -204,11 +211,11 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             if a_in:
                 a_in = float(a_in)
             else:
-                a_in = a*k_in if k_in else a*1.5*k if k else a*3.75
+                a_in = a*k_in
             if a_out:
                 a_out = float(a_out)
             else:
-                a_out = a*k_out if k_out else a*2*k if k else a*5
+                a_out = a*k_out
             if b_out:
                 b_out = float(b_out)
             else:
@@ -304,6 +311,10 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                     'Not enough data for automatic aperture factor; use '
                     'explicit aperture factor')
 
+        # k_in, k_out are in units of isophotal radius; convert to aperture radius units
+        k_in /= k
+        k_out /= k
+
         # Calculate weighted median of aperture sizes, elongations, and/or
         # orientations if requested
         r = sqrt(a*b)*k
@@ -327,12 +338,8 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         sqrt_el = sqrt(elongation)
         a, b = r*sqrt_el, r/sqrt_el
         if not have_background:
-            if not k_in:
-                k_in = 1.5*k
-            if not k_out:
-                k_out = 2*k
-            a_in = a*(k_in/k)
-            a_out, b_out = a*(k_out/k), b*(k_out/k)
+            a_in = a*k_in
+            a_out, b_out = a*k_out, b*k_out
             theta_out = theta
 
     # Calculate mean and RMS of background; to get the pure sigma, set error
@@ -432,7 +439,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         flux -= bk_flux
         bk_mean = bk_flux/area
     else:
-        # Background area equals annulus area; background already subtracted
+        # Background already subtracted; background area equals annulus area
         bk_mean = bk_flux/bk_area
 
     # Convert ADUs to electrons
@@ -448,8 +455,12 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             xi, yi = x[i], y[i]
             if isscalar(a):
                 ai = a
+                ai_in = a_in
+                ai_out = a_out
             else:
                 ai = a[i]
+                ai_in = a_in[i]
+                ai_out = a_out[i]
             if isscalar(b):
                 bi = b
             else:
@@ -470,39 +481,37 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
                 # Saturated source
                 continue
 
-            # Obtain total flux by increasing aperture size until it grows
-            # either more than before (i.e. a nearby source in the aperture) or
-            # less than the threshold (i.e. the growth curve reached
-            # saturation)
-            f0 = f_prev = flux[i]
+            # Obtain total flux by increasing aperture size until it grows either more than before (i.e. a nearby source
+            # in the aperture) or less than the threshold (i.e. the growth curve reached saturation)
+            if ai == bi:
+                f, fl = sep.sum_circle(img, [xi], [yi], ai, mask=mask, bkgann=(ai_in, a_out), subpix=0)[::2]
+            else:
+                f, fl = sep.sum_ellipse(
+                    img, [xi], [yi], ai, bi, thetai, 1, mask=mask, bkgann=(ai_in, ai_out), subpix=0)[::2]
+            if fl[0]:
+                continue
+            f0 = f_prev = f[0]
             dap = 0
-            f_tot = df_prev = None
-            while True:
+            f_tot = None
+            while dap < 100*ai:
                 dap += 0.1
                 if ai == bi:
                     f, fl = sep.sum_circle(
-                        img, [xi], [yi], ai + dap, mask=mask, subpix=0)[::2]
-                    area_i = sep.sum_circle(
-                        area_img, [xi], [yi], ai + dap, mask=mask,
-                        subpix=0)[0][0]
+                        img, [xi], [yi], ai + dap, mask=mask, bkgann=(ai_in + dap, ai_out + dap), subpix=0)[::2]
                 else:
                     f, fl = sep.sum_ellipse(
-                        img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1,
-                        mask=mask, subpix=0)[::2]
-                    area_i = sep.sum_ellipse(
-                        area_img, [xi], [yi], ai + dap, bi + dap, thetai, 1,
-                        mask=mask, subpix=0)[0][0]
-                f, fl = f[0], fl[0]
-                if fl:
+                        img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1, mask=mask,
+                        bkgann=(ai_in + dap, ai_out + dap), subpix=0)[::2]
+                if fl[0]:
                     break
-                f = (f - bk_mean[i]*area_i)*gain
+                f = f[0]
                 if f <= 0:
                     break
                 df = f/f_prev
-                if df_prev is not None and df > df_prev:
-                    # Increasing growth, nearby source hit
-                    f_tot = f_prev
-                    break
+                if df < 1:
+                    # Decreasing flux; ignore this point
+                    f_prev = f
+                    continue
                 if df < 1 + apcorr_tol:
                     # Growth stopped to within the tolerance
                     f_tot = f
@@ -511,30 +520,19 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             if f_tot is None:
                 continue
 
-            # Calculate fluxes for the chosen source for all unique aperture
-            # sizes used for other sources
+            # Calculate fluxes for the chosen source for all unique aperture sizes used for other sources
             fluxes_for_ap = {ai: f0}
             if not isscalar(a):
                 for aj in set(a) - {ai}:
-                    bj = aj*bi/ai
-                    if aj == bj:
-                        f, fl = sep.sum_circle(
-                            img, [xi], [yi], aj, mask=mask, subpix=0)[::2]
-                        area_j = sep.sum_circle(
-                            area_img, [xi], [yi], aj, mask=mask,
-                            subpix=0)[0][0]
+                    if ai == bi:
+                        f, fl = sep.sum_circle(img, [xi], [yi], aj, mask=mask, bkgann=(aj*k_in, aj*k_out), subpix=0)[::2]
                     else:
                         f, fl = sep.sum_ellipse(
-                            img, [xi], [yi], aj, bj, thetai, 1, mask=mask,
+                            img, [xi], [yi], aj, aj*bi/ai, thetai, 1, mask=mask, bkgann=(aj*k_in, aj*k_out),
                             subpix=0)[::2]
-                        area_j = sep.sum_ellipse(
-                            area_img, [xi], [yi], aj, bj, thetai, 1,
-                            mask=mask, subpix=0)[0][0]
-                    f, fl = f[0], fl[0]
-                    f = (f - bk_mean[i]*area_j)*gain
-                    if fl or f <= 0:
+                    if fl[0] or f[0] <= 0:
                         continue
-                    fluxes_for_ap[aj] = f
+                    fluxes_for_ap[aj] = f[0]
 
             # Calculate aperture corrections
             for aj, f in fluxes_for_ap.items():

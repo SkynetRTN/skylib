@@ -207,11 +207,15 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
             _rms = _rms[:height*downsample]
             if _mask is not None:
                 _mask = _mask[:height*downsample]
+            if sat_img is not None:
+                sat_img = sat_img[:height*downsample]
         if w/downsample % 1:
             _img = _img[:, :width*downsample]
             _rms = _rms[:, :width*downsample]
             if _mask is not None:
                 _mask = _mask[:, :width*downsample]
+            if sat_img is not None:
+                sat_img = sat_img[:, :width*downsample]
         _img = (_img.reshape((height, downsample, width, downsample))
                 .sum(3).sum(1)/downsample**2).astype(_img.dtype)
         _rms = (_rms.reshape((height, downsample, width, downsample))
@@ -219,6 +223,9 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
         if _mask is not None:
             _mask = (_mask.reshape((height, downsample, width, downsample))
                      .sum(3).sum(1)/downsample**2).astype(_mask.dtype)
+        if sat_img is not None:
+            sat_img = (sat_img.reshape((height, downsample, width, downsample))
+                       .sum(3).sum(1)/downsample**2).astype(sat_img.dtype)
 
     extract_kwargs = dict(
         err=_rms, mask=_mask, minarea=min_pixels, filter_kernel=filter_kernel,
@@ -238,10 +245,11 @@ def extract_sources(img: Union[ndarray, MaskedArray], downsample: int = 2,
         sources, 'saturated', zeros(len(sources), int), usemask=False)
     if seg_img is not None:
         # Count saturated pixels
+        downsample2 = downsample**2
         for y, x in zip(*sat_img.nonzero()):
             i = seg_img[y//downsample, x//downsample]
             if i:
-                sources[i - 1]['saturated'] += 1
+                sources[i - 1]['saturated'] += downsample2
         del seg_img
 
     # Exclude sources that couldn't be measured
