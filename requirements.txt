@@ -7,7 +7,7 @@ numba==0.57.0
 numpy==1.24.3
 opencv-contrib-python==4.7.0.72
 photutils==1.8.0
-Pillow==9.5.0
+Pillow==10.0.1
 scipy==1.10.1
 sep==1.2.1
 tbb==2021.9.0
