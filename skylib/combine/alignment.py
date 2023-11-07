@@ -273,7 +273,10 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
                        algorithm: str = 'AKAZE',
                        detect_edges: bool = False,
                        percentile_min: float = 10,
-                       percentile_max: float = 99, **kwargs) \
+                       percentile_max: float = 99,
+                       clip_min: Optional[float] = None,
+                       clip_max: Optional[float] = None,
+                       **kwargs) \
         -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
     """
     Extract image features; results are used by :func:`get_transform_features`
@@ -286,6 +289,8 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
     :param detect_edges: apply edge detection before feature extraction
     :param percentile_min: lower percentile for conversion to 8 bit
     :param percentile_max: upper percentile for conversion to 8 bit
+    :param clip_min: manual lower clipping factor for conversion to 8 bit; if set, `percentile_min` is ignored
+    :param clip_max: manual upper clipping factor for conversion to 8 bit; if set, `percentile_max` is ignored
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: feature keypoints and descriptors
@@ -298,31 +303,51 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
         )
 
     # Convert to [0,255) grayscale
+    if clip_min is not None:
+        clip_min = clip_min
+    if clip_max is not None:
+        clip_max = clip_max
     if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = img.min(), img.max()
+        if clip_min is None:
+            clip_min = img.min()
+        if clip_max is None:
+            clip_max = img.max()
     elif percentile_min <= 0:
-        mn = img.min()
-        if isinstance(img, np.ma.MaskedArray):
-            mx = np.nanpercentile(img.filled(np.nan), percentile_max)
-        else:
-            mx = np.nanpercentile(img, percentile_max)
+        if clip_min is None:
+            clip_min = img.min()
+        if clip_max is None:
+            if isinstance(img, np.ma.MaskedArray):
+                clip_max = np.nanpercentile(img.filled(np.nan), percentile_max)
+            else:
+                clip_max = np.nanpercentile(img, percentile_max)
     elif percentile_max >= 100:
-        if isinstance(img, np.ma.MaskedArray):
-            mn = np.nanpercentile(img.filled(np.nan), percentile_min)
-        else:
-            mn = np.nanpercentile(img, percentile_min)
-        mx = img.max()
+        if clip_min is None:
+            if isinstance(img, np.ma.MaskedArray):
+                clip_min = np.nanpercentile(img.filled(np.nan), percentile_min)
+            else:
+                clip_min = np.nanpercentile(img, percentile_min)
+        if clip_max is None:
+            clip_max = img.max()
     else:
         if isinstance(img, np.ma.MaskedArray):
-            mn, mx = np.nanpercentile(
-                img.filled(np.nan), [percentile_min, percentile_max])
+            if clip_min is None and clip_max is None:
+                clip_min, clip_max = np.nanpercentile(img.filled(np.nan), [percentile_min, percentile_max])
+            elif clip_min is None:
+                clip_min = np.nanpercentile(img.filled(np.nan), percentile_min)
+            else:
+                clip_max = np.nanpercentile(img.filled(np.nan), percentile_max)
         else:
-            mn, mx = np.nanpercentile(img, [percentile_min, percentile_max])
-    if mn >= mx:
+            if clip_min is None and clip_max is None:
+                clip_min, clip_max = np.nanpercentile(img, [percentile_min, percentile_max])
+            elif clip_min is None:
+                clip_min = np.nanpercentile(img, percentile_min)
+            else:
+                clip_max = np.nanpercentile(img, percentile_max)
+    if clip_min >= clip_max:
         raise ValueError('Empty image')
     if not isinstance(img, np.ma.MaskedArray):
         img = np.ma.masked_invalid(img)
-    img = (np.clip((img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
+    img = (np.clip((img.filled(clip_min) - clip_min)/(clip_max - clip_min), 0, 1)*255 + 0.5) \
         .astype(np.uint8)
 
     # Extract features
