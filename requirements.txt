@@ -2,7 +2,7 @@ astroscrappy==1.1.0
 astropy==5.3.4
 astroquery==0.4.6
 llvmlite==0.41.1
-matplotlib==3.8.0
+matplotlib==3.8.1
 numba==0.58.1
 numpy==1.26.1
 opencv-contrib-python==4.8.1.78
