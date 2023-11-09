@@ -362,6 +362,7 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
     if mask is not None:
         # Replace NaNs/masked values with black level values
         img = masked_img.filled(clip_min)
+        mask = mask.astype(np.uint8)
 
     # Convert to [0,255) grayscale
     img = (np.clip((img - clip_min)/(clip_max - clip_min), 0, 1)*255 + 0.5).astype(np.uint8)
