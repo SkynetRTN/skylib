@@ -273,19 +273,23 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
                        algorithm: str = 'AKAZE',
                        detect_edges: bool = False,
                        percentile_min: float = 10,
-                       percentile_max: float = 99, **kwargs) \
-        -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
+                       percentile_max: float = 99,
+                       clip_min: Optional[float] = None,
+                       clip_max: Optional[float] = None,
+                       **kwargs) -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
     """
     Extract image features; results are used by :func:`get_transform_features`
 
-    :param img: input image
-    :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK",
-        "KAZE", "ORB", "SIFT"; more are available if OpenCV contribution
-        modules are installed: "SURF" (patented, not always available);
-        for more info, see OpenCV docs
+    :param img: input image; can be either a `numpy.ma.MaskedArray` or a regular array with masked values represented by
+        NaNs
+    :param algorithm: feature detection algorithm: "AKAZE" (default), "BRISK", "KAZE", "ORB", "SIFT"; more are available
+        if OpenCV contribution modules are installed: "SURF" (patented, not always available); for more info, see OpenCV
+        docs
     :param detect_edges: apply edge detection before feature extraction
     :param percentile_min: lower percentile for conversion to 8 bit
     :param percentile_max: upper percentile for conversion to 8 bit
+    :param clip_min: manual lower clipping factor for conversion to 8 bit; if set, `percentile_min` is ignored
+    :param clip_max: manual upper clipping factor for conversion to 8 bit; if set, `percentile_max` is ignored
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: feature keypoints and descriptors
@@ -297,33 +301,71 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
             nd.sobel(img, 1, mode='nearest')
         )
 
-    # Convert to [0,255) grayscale
-    if percentile_min <= 0 and percentile_max >= 100:
-        mn, mx = img.min(), img.max()
-    elif percentile_min <= 0:
-        mn = img.min()
-        if isinstance(img, np.ma.MaskedArray):
-            mx = np.nanpercentile(img.filled(np.nan), percentile_max)
-        else:
-            mx = np.nanpercentile(img, percentile_max)
-    elif percentile_max >= 100:
-        if isinstance(img, np.ma.MaskedArray):
-            mn = np.nanpercentile(img.filled(np.nan), percentile_min)
-        else:
-            mn = np.nanpercentile(img, percentile_min)
-        mx = img.max()
+    # Convert masked values to NaNs
+    if isinstance(img, np.ma.MaskedArray):
+        masked_img = img
     else:
-        if isinstance(img, np.ma.MaskedArray):
-            mn, mx = np.nanpercentile(
-                img.filled(np.nan), [percentile_min, percentile_max])
+        masked_img = np.ma.masked_invalid(img)
+    if masked_img.mask is False or not masked_img.mask.any():
+        mask = None
+        img = img.data
+    else:
+        mask = img.mask
+        img = img.filled(np.nan)
+
+    # Find lower and upper clipping levels if not explicitly passed
+    if percentile_min <= 0:
+        if clip_min is None:
+            if mask is None:
+                clip_min = img.min()
+            else:
+                clip_min = np.nanmin(img)
+        if clip_max is None:
+            if percentile_max >= 100:
+                if mask is None:
+                    clip_max = img.max()
+                else:
+                    clip_max = np.nanmax(img)
+            elif mask is None:
+                clip_max = np.percentile(img, percentile_max)
+            else:
+                clip_max = np.nanpercentile(img, percentile_max)
+    elif percentile_max >= 100:
+        if clip_min is None:
+            if mask is None:
+                clip_min = np.percentile(img, percentile_min)
+            else:
+                clip_min = np.nanpercentile(img, percentile_min)
+        if clip_max is None:
+            if mask is None:
+                clip_max = img.max()
+            else:
+                clip_max = np.nanmax(img)
+    else:
+        if clip_min is None and clip_max is None:
+            if mask is None:
+                clip_min, clip_max = np.percentile(img, [percentile_min, percentile_max])
+            else:
+                clip_min, clip_max = np.nanpercentile(img, [percentile_min, percentile_max])
+        elif clip_min is None:
+            if mask is None:
+                clip_min = np.percentile(img, percentile_min)
+            else:
+                clip_min = np.nanpercentile(img, percentile_min)
+        elif mask is None:
+            clip_max = np.percentile(img, percentile_max)
         else:
-            mn, mx = np.nanpercentile(img, [percentile_min, percentile_max])
-    if mn >= mx:
+            clip_max = np.nanpercentile(img, percentile_max)
+    if clip_min >= clip_max:
         raise ValueError('Empty image')
-    if not isinstance(img, np.ma.MaskedArray):
-        img = np.ma.masked_invalid(img)
-    img = (np.clip((img.filled(mn) - mn)/(mx - mn), 0, 1)*255 + 0.5) \
-        .astype(np.uint8)
+
+    if mask is not None:
+        # Replace NaNs/masked values with black level values
+        img = masked_img.filled(clip_min)
+        mask = mask.astype(np.uint8)
+
+    # Convert to [0,255) grayscale
+    img = (np.clip((img - clip_min)/(clip_max - clip_min), 0, 1)*255 + 0.5).astype(np.uint8)
 
     # Extract features
     if algorithm == 'AKAZE':
@@ -343,7 +385,7 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
             'Unknown feature detection algorithm "{}"'.format(algorithm))
 
     # Detect and return features
-    return fe.detectAndCompute(img, None)
+    return fe.detectAndCompute(img, mask)
 
 
 def get_transform_features(kp1: Sequence[cv.KeyPoint], des1: np.ndarray,

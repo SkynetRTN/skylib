@@ -989,6 +989,21 @@ def combine(input_data: List[Union[pyfits.HDUList,
             # No exposure stop times
             pass
 
+        gains = []
+        for h in headers:
+            try:
+                gains.append(float(h['GAIN']))
+            except (KeyError, ValueError):
+                pass
+        if gains:
+            gain = np.mean(gains)
+            # See IRAF/DAOPHOT manual, p.20
+            if mode == 'median':
+                gain *= len(headers)*2/3
+            elif mode != 'sum':
+                gain *= len(headers)
+            hdr['GAIN'] = (gain, '[e-/count] Effective gain of the stack')
+
         hdr['COMBMETH'] = (mode.upper(), 'Stacking method')
         if mode == 'percentile':
             hdr['PERCNTLE'] = (percentile, 'Stacking percentile value')
