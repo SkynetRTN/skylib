@@ -394,7 +394,7 @@ def get_transform_features(kp1: Sequence[cv.KeyPoint], des1: np.ndarray,
                            enable_scale: bool = True,
                            enable_skew: bool = True,
                            algorithm: str = 'AKAZE',
-                           ratio_threshold: float = 0.7,
+                           ratio_threshold: float = 0.4,
                            **kwargs) \
         -> Tuple[Optional[np.ndarray], np.ndarray]:
     """
