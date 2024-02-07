@@ -196,16 +196,12 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             b = a
         if theta:
             theta = float(theta % 180)*pi/180
-            if theta > pi/2:
-                theta -= pi
         else:
             theta = 0
 
         if not have_background:
             if theta_out:
                 theta_out = float(theta_out % 180)*pi/180
-                if theta_out > pi/2:
-                    theta_out -= pi
             elif theta_out != 0:
                 theta_out = theta
             if a_in:
@@ -282,7 +278,6 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
         a[bad], b[bad] = b[bad], a[bad]
         theta[bad] += pi/2
         theta %= pi
-        theta[theta > pi/2] -= pi
         elongation = a/b
 
         # Obtain the optimal aperture radius from the brightest non-saturated
@@ -330,9 +325,7 @@ def aperture_photometry(img: Union[ndarray, MaskedArray], sources: ndarray,
             if fix_ell:
                 elongation = weighted_median(elongation, flux)
             if fix_rot:
-                theta = weighted_median(theta, flux, period=pi)
-                if theta > pi/2:
-                    theta -= pi
+                theta = weighted_median(theta, flux, period=pi) % pi
 
         # Calculate the final aperture and annulus sizes
         sqrt_el = sqrt(elongation)
