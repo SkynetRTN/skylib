@@ -308,10 +308,10 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
         masked_img = np.ma.masked_invalid(img)
     if masked_img.mask is False or not masked_img.mask.any():
         mask = None
-        img = img.data
+        img = masked_img.data
     else:
         mask = img.mask
-        img = img.filled(np.nan)
+        img = masked_img.filled(np.nan)
 
     # Find lower and upper clipping levels if not explicitly passed
     if percentile_min <= 0:
