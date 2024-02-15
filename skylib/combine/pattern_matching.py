@@ -247,7 +247,8 @@ def tri_list(pos: ndarray, ksi: float, r_limit: float, scaled: bool) \
         w = (d1 > ksi) & (d3 < r_limit)
         d1 = d  # rename d to d1 for conformance with scaled=False
     else:
-        w = (d1/scale > ksi) & (d3/d1 < r_limit)
+        w = d1 > 0
+        w[w] = (d1[w]/scale > ksi) & (d3[w]/d1[w] < r_limit)
     if not len(w.nonzero()[0]):
         # No valid triangles left after filtering; return empty lists
         return (array([]),)*5
