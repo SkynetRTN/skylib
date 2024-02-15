@@ -623,8 +623,7 @@ def get_transform_pixel(img: Union[np.ndarray, np.ma.MaskedArray],
 def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
                     mat: Optional[np.ndarray],
                     offset: np.ndarray,
-                    ref_width: int, ref_height: int,
-                    prefilter: bool = True) -> np.ma.MaskedArray:
+                    ref_width: int, ref_height: int) -> np.ma.MaskedArray:
     """
     Apply alignment transform to the image
 
@@ -634,24 +633,32 @@ def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
     :param offset: 2-element offset vector [dy, dx]
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
-    :param prefilter: apply spline filter before interpolation
 
     :return: transformed image
     """
-    # Pad the image if smaller than the reference image
-    img, mask, avg = match_ref_shape(img, ref_width, ref_height)
-
+    # Convert ij-style transform matrix to OpenCV xy-style
     if mat is None:
-        offset = -np.asarray(offset)
-        img = nd.shift(img, offset, mode='nearest', prefilter=prefilter)
-        mask = nd.shift(mask, offset, cval=1, prefilter=prefilter) > 0.06
-    else:
-        img = nd.affine_transform(
-            img, mat, offset, mode='nearest', prefilter=prefilter)
-        mask = nd.affine_transform(
-            mask, mat, offset, cval=1, prefilter=prefilter) > 0.06
+        mat = np.eye(2)
+    cv_mat = np.array([[mat[1, 1], mat[1, 0], offset[1]], [mat[0, 1], mat[0, 0], offset[0]]], np.float32)
 
-    # Match the reference image size
-    return np.ma.masked_array(
-        img[:ref_height, :ref_width], mask[:ref_height, :ref_width],
-        fill_value=avg)
+    # Always need a mask, which (even if empty) will be transformed along with the image
+    if isinstance(img, np.ma.MaskedArray):
+        mask = img.mask
+        img = img.data
+        if mask is False:
+            mask = np.zeros_like(img, np.uint8)
+        else:
+            mask = mask.astype(np.uint8)
+    else:
+        mask = np.zeros_like(img, np.uint8)
+
+    # Transform image and mask together
+    img = cv.warpAffine(
+        img, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
+        borderMode=cv.BORDER_REPLICATE)
+    # noinspection PyTypeChecker
+    mask = cv.warpAffine(
+        mask, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
+        borderMode=cv.BORDER_CONSTANT, borderValue=1)
+
+    return np.ma.masked_array(img, mask, fill_value=np.nan)
