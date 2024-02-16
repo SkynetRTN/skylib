@@ -653,9 +653,15 @@ def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
         mask = np.zeros_like(img, np.uint8)
 
     # Transform image and mask together
+    convert_float = img.dtype.char == 'f'
+    if convert_float:
+        # warpAffine() returns garbage for float32 images
+        img = img.astype(np.float64)
     img = cv.warpAffine(
         img, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
         borderMode=cv.BORDER_REPLICATE)
+    if convert_float:
+        img = img.astype(np.float32)
     # noinspection PyTypeChecker
     mask = cv.warpAffine(
         mask, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
