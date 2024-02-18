@@ -276,6 +276,7 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
                        percentile_max: float = 99,
                        clip_min: Optional[float] = None,
                        clip_max: Optional[float] = None,
+                       downsample: int = 2,
                        **kwargs) -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
     """
     Extract image features; results are used by :func:`get_transform_features`
@@ -290,10 +291,22 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
     :param percentile_max: upper percentile for conversion to 8 bit
     :param clip_min: manual lower clipping factor for conversion to 8 bit; if set, `percentile_min` is ignored
     :param clip_max: manual upper clipping factor for conversion to 8 bit; if set, `percentile_max` is ignored
+    :param downsample: optional downsampling factor
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: feature keypoints and descriptors
     """
+    # Optional downsampling
+    if downsample >= 2:
+        h, w = img.shape
+        width = w//downsample
+        height = h//downsample
+        if h/downsample % 1:
+            img = img[:height*downsample]
+        if w/downsample % 1:
+            img = img[:, :width*downsample]
+        img = img.reshape(height, downsample, width, downsample).sum(3).sum(1)/downsample**2
+
     # Optional edge detection
     if detect_edges:
         img = np.hypot(
@@ -304,14 +317,18 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
     # Convert masked values to NaNs
     if isinstance(img, np.ma.MaskedArray):
         masked_img = img
+        if masked_img.mask is False or not masked_img.mask.any():
+            mask = None
+            img = masked_img.data
+        else:
+            mask = masked_img.mask
+            img = masked_img.filled(np.nan)
     else:
         masked_img = np.ma.masked_invalid(img)
-    if masked_img.mask is False or not masked_img.mask.any():
-        mask = None
-        img = masked_img.data
-    else:
-        mask = img.mask
-        img = masked_img.filled(np.nan)
+        if masked_img.mask is False or not masked_img.mask.any():
+            mask = None
+        else:
+            mask = masked_img.mask
 
     # Find lower and upper clipping levels if not explicitly passed
     if percentile_min <= 0:
