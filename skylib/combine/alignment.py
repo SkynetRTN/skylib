@@ -640,7 +640,7 @@ def get_transform_pixel(img: Union[np.ndarray, np.ma.MaskedArray],
 def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
                     mat: Optional[np.ndarray],
                     offset: np.ndarray,
-                    ref_width: int, ref_height: int) -> np.ma.MaskedArray:
+                    ref_width: int, ref_height: int) -> Union[np.ndarray, np.ma.MaskedArray]:
     """
     Apply alignment transform to the image
 
@@ -684,4 +684,6 @@ def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
         mask, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
         borderMode=cv.BORDER_CONSTANT, borderValue=1)
 
-    return np.ma.masked_array(img, mask, fill_value=np.nan)
+    if mask.any():
+        return np.ma.masked_array(img, mask, fill_value=np.nan)
+    return img
