@@ -20,8 +20,7 @@ __all__ = [
 ]
 
 
-def match_ref_shape(img: Union[np.ndarray, np.ma.MaskedArray],
-                    ref_width: int, ref_height: int) \
+def match_ref_shape(img: Union[np.ndarray, np.ma.MaskedArray], ref_width: int, ref_height: int) \
         -> Tuple[np.ndarray, np.ndarray, float]:
     """
     Pad the image to match the reference image shape
@@ -36,10 +35,9 @@ def match_ref_shape(img: Union[np.ndarray, np.ma.MaskedArray],
     avg = float(img.mean())
 
     if w < ref_width or h < ref_height:
-        new_img = np.full(
-            [max(h, ref_height), max(w, ref_width)], avg, img.dtype)
+        new_img = np.full([max(h, ref_height), max(w, ref_width)], avg, img.dtype)
         mask = np.ones(new_img.shape, bool)
-        if isinstance(img, np.ma.MaskedArray) and img.mask.any():
+        if isinstance(img, np.ma.MaskedArray) and img.mask is not False and img.mask.any():
             new_img[:h, :w] = img.data
             mask[:h, :w] = img.mask
         else:
@@ -47,9 +45,9 @@ def match_ref_shape(img: Union[np.ndarray, np.ma.MaskedArray],
             mask[:h, :w] = False
         img = np.ma.MaskedArray(new_img, mask)
 
-    if isinstance(img, np.ma.MaskedArray) and img.mask.any():
-        # scipy.ndimage does not handle masked arrays; fill masked values with
-        # global mean and mask them after transformation
+    if isinstance(img, np.ma.MaskedArray) and img.mask is not False and img.mask.any():
+        # scipy.ndimage does not handle masked arrays; fill masked values with global mean and mask them after
+        # transformation
         if img.mask.shape:
             mask = img.mask.astype(np.float32)
         else:
@@ -61,17 +59,13 @@ def match_ref_shape(img: Union[np.ndarray, np.ma.MaskedArray],
     return img, mask, avg
 
 
-def get_transform_stars(src_stars: Union[TList[Tuple[float, float]],
-                                         np.ndarray],
-                        dst_stars: Union[TList[Tuple[float, float]],
-                                         np.ndarray],
+def get_transform_stars(src_stars: Union[TList[Tuple[float, float]], np.ndarray],
+                        dst_stars: Union[TList[Tuple[float, float]], np.ndarray],
                         enable_rot: bool = True,
                         enable_scale: bool = True,
-                        enable_skew: bool = True) \
-        -> Tuple[Optional[np.ndarray], np.ndarray]:
+                        enable_skew: bool = True)  -> Tuple[Optional[np.ndarray], np.ndarray]:
     """
-    Calculate the alignment transformation based on pixel coordinates of one
-    or more stars
+    Calculate the alignment transformation based on pixel coordinates of one or more stars
 
     :param src_stars: list of (X, Y) coordinates of one or more alignment stars
         in the image being aligned, 1-based
@@ -276,6 +270,7 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
                        percentile_max: float = 99,
                        clip_min: Optional[float] = None,
                        clip_max: Optional[float] = None,
+                       downsample: int = 2,
                        **kwargs) -> Tuple[Sequence[cv.KeyPoint], np.ndarray]:
     """
     Extract image features; results are used by :func:`get_transform_features`
@@ -290,28 +285,41 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
     :param percentile_max: upper percentile for conversion to 8 bit
     :param clip_min: manual lower clipping factor for conversion to 8 bit; if set, `percentile_min` is ignored
     :param clip_max: manual upper clipping factor for conversion to 8 bit; if set, `percentile_max` is ignored
+    :param downsample: optional downsampling factor
     :param kwargs: extra feature detector-specific keyword arguments
 
     :return: feature keypoints and descriptors
     """
+    # Optional downsampling
+    if downsample >= 2:
+        h, w = img.shape
+        width = w//downsample
+        height = h//downsample
+        if h/downsample % 1:
+            img = img[:height*downsample]
+        if w/downsample % 1:
+            img = img[:, :width*downsample]
+        img = img.reshape(height, downsample, width, downsample).sum(3).sum(1)/downsample**2
+
     # Optional edge detection
     if detect_edges:
-        img = np.hypot(
-            nd.sobel(img, 0, mode='nearest'),
-            nd.sobel(img, 1, mode='nearest')
-        )
+        img = np.hypot(nd.sobel(img, 0, mode='nearest'), nd.sobel(img, 1, mode='nearest'))
 
     # Convert masked values to NaNs
     if isinstance(img, np.ma.MaskedArray):
         masked_img = img
+        if masked_img.mask is False or not masked_img.mask.any():
+            mask = None
+            img = masked_img.data
+        else:
+            mask = masked_img.mask
+            img = masked_img.filled(np.nan)
     else:
         masked_img = np.ma.masked_invalid(img)
-    if masked_img.mask is False or not masked_img.mask.any():
-        mask = None
-        img = masked_img.data
-    else:
-        mask = img.mask
-        img = masked_img.filled(np.nan)
+        if masked_img.mask is False or not masked_img.mask.any():
+            mask = None
+        else:
+            mask = masked_img.mask
 
     # Find lower and upper clipping levels if not explicitly passed
     if percentile_min <= 0:
@@ -384,8 +392,15 @@ def get_image_features(img: Union[np.ndarray, np.ma.MaskedArray],
         raise ValueError(
             'Unknown feature detection algorithm "{}"'.format(algorithm))
 
-    # Detect and return features
-    return fe.detectAndCompute(img, mask)
+    # Detect features
+    keypoints, descriptors = fe.detectAndCompute(img, mask)
+
+    if downsample > 1:
+        # Rescale feature coordinates back to original
+        for p in keypoints:
+            p.pt = p.pt[0]*downsample, p.pt[1]*downsample
+
+    return keypoints, descriptors
 
 
 def get_transform_features(kp1: Sequence[cv.KeyPoint], des1: np.ndarray,
@@ -623,8 +638,7 @@ def get_transform_pixel(img: Union[np.ndarray, np.ma.MaskedArray],
 def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
                     mat: Optional[np.ndarray],
                     offset: np.ndarray,
-                    ref_width: int, ref_height: int,
-                    prefilter: bool = True) -> np.ma.MaskedArray:
+                    ref_width: int, ref_height: int) -> Union[np.ndarray, np.ma.MaskedArray]:
     """
     Apply alignment transform to the image
 
@@ -634,24 +648,40 @@ def apply_transform(img: Union[np.ndarray, np.ma.MaskedArray],
     :param offset: 2-element offset vector [dy, dx]
     :param ref_width: reference image width in pixels
     :param ref_height: reference image height in pixels
-    :param prefilter: apply spline filter before interpolation
 
     :return: transformed image
     """
-    # Pad the image if smaller than the reference image
-    img, mask, avg = match_ref_shape(img, ref_width, ref_height)
-
+    # Convert ij-style transform matrix to OpenCV xy-style
     if mat is None:
-        offset = -np.asarray(offset)
-        img = nd.shift(img, offset, mode='nearest', prefilter=prefilter)
-        mask = nd.shift(mask, offset, cval=1, prefilter=prefilter) > 0.06
-    else:
-        img = nd.affine_transform(
-            img, mat, offset, mode='nearest', prefilter=prefilter)
-        mask = nd.affine_transform(
-            mask, mat, offset, cval=1, prefilter=prefilter) > 0.06
+        mat = np.eye(2)
+    cv_mat = np.array([[mat[1, 1], mat[1, 0], offset[1]], [mat[0, 1], mat[0, 0], offset[0]]], np.float32)
 
-    # Match the reference image size
-    return np.ma.masked_array(
-        img[:ref_height, :ref_width], mask[:ref_height, :ref_width],
-        fill_value=avg)
+    # Always need a mask, which (even if empty) will be transformed along with the image
+    if isinstance(img, np.ma.MaskedArray):
+        mask = img.mask
+        img = img.data
+        if mask is False:
+            mask = np.zeros_like(img, np.uint8)
+        else:
+            mask = mask.astype(np.uint8)
+    else:
+        mask = np.zeros_like(img, np.uint8)
+
+    # Transform image and mask together
+    convert_float = img.dtype.char == 'f'
+    if convert_float:
+        # warpAffine() returns garbage for float32 images
+        img = img.astype(np.float64)
+    img = cv.warpAffine(
+        img, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
+        borderMode=cv.BORDER_REPLICATE)
+    if convert_float:
+        img = img.astype(np.float32)
+    # noinspection PyTypeChecker
+    mask = cv.warpAffine(
+        mask, cv_mat, (ref_width, ref_height), flags=cv.INTER_LINEAR | cv.WARP_INVERSE_MAP,
+        borderMode=cv.BORDER_CONSTANT, borderValue=1)
+
+    if mask.any():
+        return np.ma.masked_array(img, mask, fill_value=np.nan)
+    return img

@@ -2,16 +2,18 @@
 Helper functions for working with angular quantities
 """
 
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable
 
 import numpy as np
+from numba import njit
 
 
 __all__ = ['angdist', 'average_radec']
 
 
-def angdist(ra1_hours: float, dec1_degs: float, ra2_hours: float,
-            dec2_degs: float) -> float:
+@njit(cache=True)
+def angdist(ra1_hours: float | np.ndarray, dec1_degs: float | np.ndarray,
+            ra2_hours: float | np.ndarray, dec2_degs: float | np.ndarray) -> float | np.ndarray:
     """
     Angular distance between two points on celestial sphere
 
@@ -22,39 +24,27 @@ def angdist(ra1_hours: float, dec1_degs: float, ra2_hours: float,
 
     :return: angular distance in degrees
     """
-    ra1 = np.deg2rad(ra1_hours)*15
+    ra1 = ra1_hours*(np.pi/12)
     dec1 = np.deg2rad(dec1_degs)
-    ra2 = np.deg2rad(ra2_hours)*15
+    ra2 = ra2_hours*(np.pi/12)
     dec2 = np.deg2rad(dec2_degs)
-    return 2*np.rad2deg(np.arcsin(np.sqrt(np.clip(
-        np.sin((dec1 - dec2)/2)**2 +
-        np.sin((ra1 - ra2)/2)**2*np.cos(dec1)*np.cos(dec2), 0, 1))))
+    return 2*np.rad2deg(np.arcsin(np.sqrt(
+        np.sin((dec1 - dec2)/2)**2 + np.sin((ra1 - ra2)/2)**2*np.cos(dec1)*np.cos(dec2))))
 
 
-def average_radec(ra_hours_or_radec: Iterable[Union[float,
-                                                    Tuple[float, float]]],
-                  dec_degs: Optional[Iterable[float]] = None) \
-        -> Tuple[float, float]:
+@njit(cache=True)
+def average_radec(radec: np.ndarray) -> tuple[float, float]:
     """
     Mean right ascension and declination of multiple points on celestial sphere
 
-    :param ra_hours_or_radec: array of right ascensions in hours
-        (average_radec(ra, dec)) or array of RA/Dec pairs
-        (average_radec(radec)) in hours and degrees, respectively
-    :param dec_degs: array of declinations; unused in the second form
-        (average_radec(radec))
+    :param radec: (2xN) array of RA/Dec pairs (average_radec(radec)) in hours and degrees, respectively
 
     :return: average RA (hours) and Dec (degrees)
     """
-    if dec_degs is None:
-        ra_hours, dec_degs = np.transpose(ra_hours_or_radec)
-        ra_degs = ra_hours*15
-    else:
-        ra_degs = np.asarray(ra_hours_or_radec)*15
-    x = (np.cos(ra_degs)*np.cos(dec_degs)).mean()
-    y = (np.sin(ra_degs)*np.cos(dec_degs)).mean()
-    z = np.sin(dec_degs).mean()
-    return (
-        np.rad2deg(np.arctan2(y, x))/15 % 24,
-        np.rad2deg(np.arctan2(z, np.hypot(x, y)))
-    )
+    ra = radec[:, 0]*(np.pi/12)
+    dec = np.deg2rad(radec[:, 1])
+    cos_dec = np.cos(dec)
+    x = (np.cos(ra)*cos_dec).mean()
+    y = (np.sin(ra)*cos_dec).mean()
+    z = np.sin(dec).mean()
+    return np.arctan2(y, x)*(12/np.pi) % 24, np.rad2deg(np.arctan2(z, np.hypot(x, y)))
