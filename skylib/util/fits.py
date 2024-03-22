@@ -113,7 +113,7 @@ def get_fits_exp_length(hdr: Header) -> Optional[float]:
     :return: exposure length in seconds; None if unknown
     """
     texp = None
-    for name in ('EXPOSURE', 'EXPTIME'):
+    for name in ('EXPTIME', 'EXPOSURE'):
         try:
             texp = float(hdr[name])
         except (KeyError, ValueError):
