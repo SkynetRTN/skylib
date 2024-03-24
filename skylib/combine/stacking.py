@@ -8,7 +8,7 @@ modes with optional scaling and outlier rejection.
 import gc
 import os.path
 import logging
-from typing import BinaryIO
+from typing import BinaryIO, Callable, Optional
 from datetime import timedelta
 from tempfile import TemporaryFile
 
@@ -29,7 +29,7 @@ __all__ = ['combine']
 def _calc_scaling(scaling: str,
                   percentile: float,
                   input_data: list[callable],
-                  callback: callable | None = None,
+                  callback: Optional[Callable] = None,
                   progress: float = 0,
                   progress_step: float = 0) -> tuple[np.ndarray, np.ndarray, float, float]:
     """
@@ -282,7 +282,7 @@ def _do_combine(input_data: list[callable],
                 multiplicative_percentile: float = 99.9,
                 equalize_global: bool = False,
                 max_mem_mb: float = 100.0,
-                callback: callable | None = None,
+                callback: Optional[Callable] = None,
                 progress: float = 0,
                 progress_step: float = 0,
                 save_masks: bool = False) \
@@ -589,7 +589,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
             equalize_global: bool = False,
             smart_stacking: str | None = None,
             max_mem_mb: float = 100.0,
-            callback: callable | None = None,
+            callback: Optional[Callable] = None,
             return_headers: bool = True) \
         -> list[tuple[np.ndarray, pyfits.Header] | np.ndarray]:
     """
