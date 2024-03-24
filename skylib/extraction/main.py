@@ -14,7 +14,7 @@ from astropy.modeling.models import Gaussian2D
 import sep
 
 from ..calibration.background import estimate_background, sep_compatible
-from .centroiding import centroid_sources
+from .centroiding import centroid_iraf, centroid_iraf_masked
 
 
 __all__ = [
@@ -278,9 +278,12 @@ def extract_sources(img: np.ndarray | np.ma.MaskedArray,
     sources['y'] += 1
 
     if len(sources) and centroid:
-        # Centroid sources using the IRAF-like method
-        sources['x'], sources['y'] = centroid_sources(
-            det_img, sources['x'], sources['y'], np.clip(0.5*gaussian_sigma_to_fwhm*sources['a'], 3, None))
+        # Centroid sources using IRAF-like method
+        radius = np.clip(0.5*gaussian_sigma_to_fwhm*sources['a'], 3, None)
+        if isinstance(det_img, np.ma.MaskedArray) and det_img.mask is not False:
+            centroid_iraf_masked(det_img.data, det_img.mask, sources['x'], sources['y'], radius)
+        else:
+            centroid_iraf(det_img, sources['x'], sources['y'], radius)
 
     return sources, bkg, rms
 
