@@ -73,7 +73,7 @@ __all__ = ['pattern_match']
 # }
 
 
-@njit(cache=True)
+@njit(nogil=True, cache=True)
 def edges(pos: np.ndarray, ijk: np.ndarray) -> np.ndarray:
     """
     Given a vector of points pos[i] = (Xi,Yi) (i = 0,...,n-1) and a matrix of triangle vertex indices
@@ -99,7 +99,7 @@ def edges(pos: np.ndarray, ijk: np.ndarray) -> np.ndarray:
     return res
 
 
-@njit(cache=True)
+@njit(nogil=True, cache=True)
 def get_tri_indices(n: int) -> np.ndarray:
     """
     Generate a list of triangle vertex indices for the given number of points
@@ -138,7 +138,7 @@ def get_tri_indices(n: int) -> np.ndarray:
     return res
 
 
-@njit(cache=True)
+@njit(nogil=True, cache=True)
 def tri_list(pos: np.ndarray, ksi: float, r_limit: float, scaled: bool) \
         -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -240,7 +240,7 @@ def tri_list(pos: np.ndarray, ksi: float, r_limit: float, scaled: bool) \
     return ijk, d1, d2, d3, orient
 
 
-@njit(cache=True, parallel=True)
+@njit(nogil=True, cache=True, parallel=True)
 def pattern_match(pos1: np.ndarray, pos2: np.ndarray, scale_invariant: bool = False, eps: float = 0.001,
                   ksi: float = 0.003, r_limit: float = 10, confidence: float = 0.15) -> np.ndarray:
     """

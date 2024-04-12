@@ -11,7 +11,7 @@ from numba import njit
 __all__ = ['angdist', 'average_radec']
 
 
-@njit(cache=True)
+@njit(nogil=True, cache=True)
 def angdist(ra1_hours: float | np.ndarray, dec1_degs: float | np.ndarray,
             ra2_hours: float | np.ndarray, dec2_degs: float | np.ndarray) -> float | np.ndarray:
     """
@@ -32,7 +32,7 @@ def angdist(ra1_hours: float | np.ndarray, dec1_degs: float | np.ndarray,
         np.sin((dec1 - dec2)/2)**2 + np.sin((ra1 - ra2)/2)**2*np.cos(dec1)*np.cos(dec2))))
 
 
-@njit(cache=True)
+@njit(nogil=True, cache=True)
 def average_radec(radec: np.ndarray) -> tuple[float, float]:
     """
     Mean right ascension and declination of multiple points on celestial sphere
