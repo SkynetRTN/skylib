@@ -1,30 +1,31 @@
 """
-High-level aperture photometry interface.
+Aperture photometry.
 
-:func:`~aperture_photometry()`: fixed or automatic aperture photometry
-of an image after source extraction.
+:func:`~aperture_photometry()`: fixed or automatic aperture photometry of an image after source extraction.
 """
 
 import numpy as np
 from numpy.lib.recfunctions import append_fields
 from numpy.ma import MaskedArray
 from scipy.optimize import minimize
-import sep
+from numba import njit, prange
 
 from ..calibration.background import estimate_background, sep_compatible
 from ..util.stats import weighted_median
+from .aperture_numba import sum_circle, sum_ellipse, sum_circann, sum_ellipann, _sum_circle, _sum_ellipse
 
 
 __all__ = ['aperture_photometry']
 
 
-def calc_flux_err(a: float, img_back: np.ndarray, x: float, y: float, elongation: float, theta: float,
+@njit(nogil=True, error_model='numpy', cache=True)
+def calc_flux_err(a: np.ndarray, img_back: np.ndarray, x: float, y: float, elongation: float, theta: float,
                   err: np.ndarray, mask: np.ndarray, gain: float) -> float:
     """
     Calculate flux error for a source depending on the aperture size; used by adaptive photometry to calculate
     the optimal aperture
 
-    :param a: aperture size
+    :param a: aperture size as 1D 1-element array
     :param img_back: image with background subtracted
     :param x: source centroid X
     :param y: source centroid Y
@@ -36,13 +37,101 @@ def calc_flux_err(a: float, img_back: np.ndarray, x: float, y: float, elongation
 
     :return: flux error for the given aperture
     """
-    flux, flux_err, flags = sep.sum_ellipse(
-        img_back, [x], [y], a, a/elongation, theta, 1, err=err, mask=mask, gain=gain, subpix=0)
-    if flags:
-        raise ValueError('flags = {}'.format(flags))
-    if flux <= 0:
-        raise ValueError('flux = {}'.format(flux))
+    aper = np.empty(4, np.float64)
+    aper[0] = a[0]
+    aper[1] = a[0]/elongation
+    aper[2] = theta
+    aper[3] = 1
+    flux, flux_err, _, flags = _sum_ellipse(x, y, aper, img_back, mask, 0, err, None, 0, gain)
+    if flags or flux <= 0:
+        raise ValueError()
+    # noinspection PyTypeChecker
     return flux_err/flux
+
+
+@njit(nogil=True, cache=True, parallel=True)
+def isophotal_analysis(img_back: np.ndarray, x: np.ndarray, y: np.ndarray, radius: float):
+    """
+    Perform isophotal analysis at the given (X,Y) positions
+
+    :param img_back: original image with background subtracted
+    :param x: 1D array of X coordinates (0-based) of sources
+    :param y: 1D array of Y coordinates (0-based) of sources, same shape as `x`
+    :param radius: analysis radius in pixels
+    :return:
+        - array of semi-major axes in pixels
+        - array of semi-minor axes in pixels
+        - array of pisition angles in radians
+        - array of fluxes
+    """
+    h, w = img_back.shape
+    n = len(x)
+    a = np.empty(n, np.float64)
+    b = np.empty(n, np.float64)
+    theta = np.empty(n, np.float64)
+    flux = np.empty(n, np.float64)
+
+    # np.indices() for 2D array
+    xx = np.empty_like(img_back, np.int64)
+    yy = np.empty_like(img_back, np.int64)
+    for i in prange(w):
+        xx[:, i] = i
+    for i in prange(h):
+        yy[i] = i
+
+    for k in prange(n):
+        ap = (xx - x[k])**2 + (yy - y[k])**2 <= radius**2
+        if ap.any():
+            yi, xi = ap.nonzero()
+            nap = len(xi)
+            ap_data = np.empty(nap, np.float64)
+            ofs = 0
+            for i in range(h):
+                for j in range(w):
+                    if ap[i, j]:
+                        ap_data[ofs] = img_back[i, j]
+                        ofs += 1
+            f = ap_data.sum()
+            if f > 0:
+                cx = (xi*ap_data).sum()/f
+                cy = (yi*ap_data).sum()/f
+                x2 = (xi**2*ap_data).sum()/f - cx**2
+                y2 = (yi**2*ap_data).sum()/f - cy**2
+                xy = (xi*yi*ap_data).sum()/f - cx*cy
+            else:
+                cx, cy = xi.mean(), yi.mean()
+                x2 = (xi**2).mean() - cx**2
+                y2 = (yi**2).mean() - cy**2
+                xy = (xi*yi).mean() - cx*cy
+            if x2 == y2:
+                thetai = 0
+            else:
+                thetai = np.arctan(2*xy/(x2 - y2))/2
+                if y2 > x2:
+                    thetai += np.pi/2
+            m1 = (x2 + y2)/2
+            m2 = np.sqrt(max((x2 - y2)**2/4 + xy**2, 0))
+            ai = max(1/12, np.sqrt(max(m1 + m2, 0)))
+            bi = max(1/12, np.sqrt(max(m1 - m2, 0)))
+            if ai/bi > 3:
+                # Prevent too elongated apertures usually occurring for faint objects
+                bi = ai
+            if ai < bi:
+                ai, bi = bi, ai
+                thetai += np.pi/2
+            thetai %= np.pi
+            if thetai > np.pi/2:
+                thetai -= np.pi
+        else:
+            # Cannot obtain a,b,theta from isophotal analysis, assume circular aperture
+            ai, bi, thetai, f = radius, radius, 0, 0
+
+        a[k] = ai
+        b[k] = bi
+        theta[k] = thetai
+        flux[k] = f
+
+    return a, b, theta, flux
 
 
 def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
@@ -66,7 +155,8 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
                         fix_aper: bool = False,
                         fix_ell: bool = True,
                         fix_rot: bool = True,
-                        apcorr_tol: float = 0.0001) -> np.ndarray:
+                        apcorr_tol: float = 0.0001,
+                        reject_outliers: bool = False) -> np.ndarray:
     """
     Do automatic or fixed aperture photometry
 
@@ -107,6 +197,8 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
     :param fix_rot: use the same aperture position angle for all sources during automatic photometry; calculated as
         flux-weighted median of all orientations
     :param apcorr_tol: growth curve stopping tolerance for aperture correction; 0 = disable aperture correction
+    :param reject_outliers: if using annulus for background estimation, reject outlying pixels in the annulus; jgnored
+        if `background` is supplied
 
     :return: record array containing the input sources, with the following fields added or updated: "flux", "flux_err",
         "mag", "mag_err", "aper_a", "aper_b", "aper_theta", "aper_a_in", "aper_a_out", "aper_b_out", "aper_theta_out",
@@ -138,7 +230,6 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
         k_out = 5
 
     x, y = sources['x'] - 1, sources['y'] - 1
-    area_img = np.ones(img.shape, np.int32)
     if isinstance(img, MaskedArray):
         mask = img.mask
         img = img.data
@@ -182,7 +273,7 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
         else:
             theta = 0
 
-        if not have_background:
+        if not have_background or apcorr_tol > 0:
             if theta_out:
                 theta_out = float(theta_out) % 180
                 if theta_out > 90:
@@ -218,50 +309,14 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
         bad = (a <= 0) | (b <= 0) | (flux <= 0)
         if bad.any():
             # Do isophotal analysis to compute ellipse parameters if missing
-            yy, xx = np.indices(img.shape)
-            for i in bad.nonzero()[0]:
-                ap = (xx - sources[i]['x'])**2 + (yy - sources[i]['y'])**2 <= radius**2
-                if ap.any():
-                    yi, xi = ap.nonzero()
-                    ap_data = img_back[ap].astype(float)
-                    f = ap_data.sum()
-                    if f > 0:
-                        cx = (xi*ap_data).sum()/f
-                        cy = (yi*ap_data).sum()/f
-                        x2 = (xi**2*ap_data).sum()/f - cx**2
-                        y2 = (yi**2*ap_data).sum()/f - cy**2
-                        xy = (xi*yi*ap_data).sum()/f - cx*cy
-                    else:
-                        cx, cy = xi.mean(), yi.mean()
-                        x2 = (xi**2).mean() - cx**2
-                        y2 = (yi**2).mean() - cy**2
-                        xy = (xi*yi).mean() - cx*cy
-                    if x2 == y2:
-                        thetai = 0
-                    else:
-                        thetai = np.arctan(2*xy/(x2 - y2))/2
-                        if y2 > x2:
-                            thetai += np.pi/2
-                    m1 = (x2 + y2)/2
-                    m2 = np.sqrt(max((x2 - y2)**2/4 + xy**2, 0))
-                    ai = max(1/12, np.sqrt(max(m1 + m2, 0)))
-                    bi = max(1/12, np.sqrt(max(m1 - m2, 0)))
-                    if ai/bi > 2:
-                        # Prevent too elongated apertures usually occurring for faint objects
-                        bi = ai
-                else:
-                    # Cannot obtain a,b,theta from isophotal analysis, assume circular aperture
-                    ai, bi, thetai, f = radius, radius, 0, 0
-                a[i] = ai
-                b[i] = bi
-                theta[i] = thetai
-                flux[i] = f
-        bad = (a < b).nonzero()
-        a[bad], b[bad] = b[bad], a[bad]
-        theta[bad] += np.pi/2
-        theta %= np.pi
-        theta[theta > np.pi/2] -= np.pi
-        elongation = a/b
+            a[bad], b[bad], theta[bad], flux[bad] = isophotal_analysis(
+                img_back, sources['x'][bad], sources['y'][bad], radius)
+        else:
+            theta %= np.pi
+            theta[theta > np.pi/2] -= np.pi
+        elongation = np.zeros_like(a)
+        good = b > 0
+        elongation[good] = a[good]/b[good]
         sources['a'] = a
         sources['b'] = b
         sources['theta'] = theta
@@ -269,14 +324,18 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
 
         # Obtain the optimal aperture radius from the brightest non-saturated source
         if not k:
+            aper = np.empty(4, np.float64)
+            aper[3] = 1
+            noise = np.zeros((1, 1), np.float64)
             for i in np.argsort(flux)[::-1]:
-                if sep.sum_ellipse(img >= sat_level, [x[i]], [y[i]], a[i], b[i], theta[i], 1, subpix=0)[0][0]:
+                aper[:3] = a[i], b[i], theta[i]
+                if _sum_ellipse(x[i], y[i], aper, img >= sat_level, None, 0, noise, None, 0, 0)[0]:
                     # Saturated source
                     continue
                 try:
                     # noinspection PyTypeChecker
                     res = minimize(
-                        calc_flux_err, [a[i]*1.6],
+                        calc_flux_err, np.array([a[i]*1.6]),
                         (img_back, x[i], y[i], elongation[i], theta[i], tmp_rms, mask, gain),
                         bounds=[(1, None)], tol=1e-5)
                 except ValueError:
@@ -312,51 +371,42 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
         # Calculate the final aperture and annulus sizes
         sqrt_el = np.sqrt(elongation)
         a, b = r*sqrt_el, r/sqrt_el
-        if not have_background:
+        if not have_background or apcorr_tol > 0:
             a_in = a*k_in
             a_out, b_out = a*k_out, b*k_out
             theta_out = theta
 
     # Calculate mean and RMS of background; to get the pure sigma, set error to 1 and don't pass the gain; use
-    # sep.sum_*() instead of analytic expressions to calculate the aperture and annulus area accounting for masked
+    # sum_*() instead of analytic expressions to calculate the aperture and annulus area accounting for masked
     # pixels and edges
     if have_background:
+        # No outlier rejection needed since the background map is expected to be smooth
         if fixed_aper and a == b:
-            bk_area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
-            bk_flux = sep.sum_circle(background, x, y, a, err=1, mask=mask, subpix=0)[0]
+            bk_flux, _, bk_area, _ = sum_circle(background, x, y, a, err=1, mask=mask)
         else:
-            bk_area = sep.sum_ellipse(area_img, x, y, a, b, theta, 1, mask=mask, subpix=0)[0]
-            bk_flux = sep.sum_ellipse(background, x, y, a, b, theta, 1, err=1, mask=mask, subpix=0)[0]
+            bk_flux, _, bk_area, _ = sum_ellipse(background, x, y, a, b, theta, 1, err=1, mask=mask)
     elif fixed_aper and a_out == b_out:
-        bk_area = sep.sum_circann(area_img, x, y, a_in, a_out, mask=mask, subpix=0)[0]
-        bk_flux = sep.sum_circann(img, x, y, a_in, a_out, mask=mask, subpix=0)[0]
+        bk_flux, _, bk_area, _ = sum_circann(img, x, y, a_in, a_out, mask=mask, reject_outliers=reject_outliers)
     else:
-        bk_area = sep.sum_ellipann(
-            area_img, x, y, a_in, a_in*b_out/a_out, theta_out, 1, a_out/a_in, mask=mask, subpix=0)[0]
-        bk_flux = sep.sum_ellipann(
-            img, x, y, a_in, a_in*b_out/a_out, theta_out, 1, a_out/a_in, mask=mask, subpix=0)[0]
-
-    if have_background:
-        area = bk_area
-    elif fixed_aper and a == b:
-        area = sep.sum_circle(area_img, x, y, a, mask=mask, subpix=0)[0]
-    else:
-        area = sep.sum_ellipse(area_img, x, y, a, b, theta, 1, mask=mask, subpix=0)[0]
+        bk_flux, _, bk_area, _ = sum_ellipann(
+            img, x, y, a_in, a_in*b_out/a_out, theta_out, 1, a_out/a_in, mask=mask, reject_outliers=reject_outliers)
 
     if fixed_aper and a == b:
         # Fixed circular aperture
         if have_background:
-            flux, flux_err, flags = sep.sum_circle(img, x, y, a, err=background_rms, mask=mask, gain=gain, subpix=0)
+            flux, flux_err, area, flags = sum_circle(img, x, y, a, err=background_rms, mask=mask, gain=gain)
         else:
-            flux, flux_err, flags = sep.sum_circle(img, x, y, a, mask=mask, bkgann=(a_in, a_out), gain=gain, subpix=0)
+            flux, flux_err, area, flags = sum_circle(
+                img, x, y, a, mask=mask, bkgann=(a_in, a_out), gain=gain, reject_outliers=reject_outliers)
     else:
         # Variable or elliptic aperture
         if have_background:
-            flux, flux_err, flags = sep.sum_ellipse(
-                img, x, y, a, b, theta, 1, err=background_rms, mask=mask, gain=gain, subpix=0)
+            flux, flux_err, area, flags = sum_ellipse(
+                img, x, y, a, b, theta, 1, err=background_rms, mask=mask, gain=gain)
         else:
-            flux, flux_err, flags = sep.sum_ellipse(
-                img, x, y, a, b, theta, 1, mask=mask, bkgann=(a_in, a_out), gain=gain, subpix=0)
+            flux, flux_err, area, flags = sum_ellipse(
+                img, x, y, a, b, theta, 1, mask=mask, bkgann=(a_in/a, a_out/a), gain=gain,
+                reject_outliers=reject_outliers)
 
     if have_background:
         # Subtract background from fluxes; background area equals aperture area
@@ -374,6 +424,10 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
     # Calculate aperture correction for all aperture sizes from the brightest source
     aper_corr = {}
     if apcorr_tol > 0:
+        aper_circle = np.empty(1, np.float64)
+        aper_ellipse = np.empty(4, np.float64)
+        aper_ellipse[3] = 1
+        noise = np.zeros((1, 1), np.float64)
         for i in np.argsort(flux)[::-1]:
             xi, yi = x[i], y[i]
             if np.isscalar(a):
@@ -398,9 +452,11 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
                 ai_out = a_out[i]
 
             if ai == bi:
-                nsat = sep.sum_circle(img >= sat_level, [xi], [yi], ai, subpix=0)[0][0]
+                aper_circle[0] = ai
+                nsat = _sum_circle(xi, yi, aper_circle, img >= sat_level, None, 0, noise, None, 0, 0)[0]
             else:
-                nsat = sep.sum_ellipse(img >= sat_level, [xi], [yi], ai, bi, thetai, 1, subpix=0)[0][0]
+                aper_ellipse[:3] = ai, bi, thetai
+                nsat = _sum_ellipse(xi, yi, aper_ellipse, img >= sat_level, None, 0, noise, None, 0, 0)[0]
             if nsat:
                 # Saturated source
                 continue
@@ -408,10 +464,11 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
             # Obtain total flux by increasing aperture size until it grows either more than before (i.e. a nearby source
             # in the aperture) or less than the threshold (i.e. the growth curve reached saturation)
             if ai == bi:
-                f, fl = sep.sum_circle(img, [xi], [yi], ai, mask=mask, bkgann=(ai_in, a_out), subpix=0)[::2]
+                f, _, _, fl = sum_circle(
+                    img, xi, yi, ai, mask=mask, bkgann=(ai_in, a_out), reject_outliers=reject_outliers)
             else:
-                f, fl = sep.sum_ellipse(
-                    img, [xi], [yi], ai, bi, thetai, 1, mask=mask, bkgann=(ai_in, ai_out), subpix=0)[::2]
+                f, _, _, fl = sum_ellipse(
+                    img, xi, yi, ai, bi, thetai, 1, mask=mask, bkgann=(ai_in, ai_out), reject_outliers=reject_outliers)
             if fl[0]:
                 continue
             f0 = f_prev = f[0]
@@ -420,12 +477,13 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
             while dap < 100*ai:
                 dap += 0.1
                 if ai == bi:
-                    f, fl = sep.sum_circle(
-                        img, [xi], [yi], ai + dap, mask=mask, bkgann=(ai_in + dap, ai_out + dap), subpix=0)[::2]
+                    f, _, _, fl = sum_circle(
+                        img, xi, yi, ai + dap, mask=mask, bkgann=(ai_in + dap, ai_out + dap),
+                        reject_outliers=reject_outliers)
                 else:
-                    f, fl = sep.sum_ellipse(
-                        img, [xi], [yi], ai + dap, bi*(1 + dap/ai), thetai, 1, mask=mask,
-                        bkgann=(ai_in + dap, ai_out + dap), subpix=0)[::2]
+                    f, _, _, fl = sum_ellipse(
+                        img, xi, yi, ai + dap, bi*(1 + dap/ai), thetai, 1, mask=mask,
+                        bkgann=(ai_in + dap, ai_out + dap), reject_outliers=reject_outliers)
                 if fl[0]:
                     break
                 f = f[0]
@@ -449,12 +507,12 @@ def aperture_photometry(img: np.ndarray | np.ma.MaskedArray,
             if not np.isscalar(a):
                 for aj in set(a) - {ai}:
                     if ai == bi:
-                        f, fl = sep.sum_circle(
-                            img, [xi], [yi], aj, mask=mask, bkgann=(aj*k_in, aj*k_out), subpix=0)[::2]
+                        f, _, _, fl = sum_circle(
+                            img, xi, yi, aj, mask=mask, bkgann=(aj*k_in, aj*k_out), reject_outliers=reject_outliers)
                     else:
-                        f, fl = sep.sum_ellipse(
-                            img, [xi], [yi], aj, aj*bi/ai, thetai, 1, mask=mask, bkgann=(aj*k_in, aj*k_out),
-                            subpix=0)[::2]
+                        f, _, _, fl = sum_ellipse(
+                            img, xi, yi, aj, aj*bi/ai, thetai, 1, mask=mask, bkgann=(aj*k_in, aj*k_out),
+                            reject_outliers=reject_outliers)
                     if fl[0] or f[0] <= 0:
                         continue
                     fluxes_for_ap[aj] = f[0]

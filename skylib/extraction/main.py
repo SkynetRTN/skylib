@@ -112,9 +112,9 @@ def extract_sources(img: np.ndarray | np.ma.MaskedArray,
     :param max_sources: maximum allowed number of detected sources
 
     :return:
-        record array containing isophotal parameters for each source; see :func:`~sep.extract` for a list of fields
-        background map array (ADUs), same shape as `img`
-        background RMS array (ADUs), same shape as `img`
+        * record array containing isophotal parameters for each source; see :func:`~sep.extract` for a list of fields
+        * background map array (ADUs), same shape as `img`
+        * background RMS array (ADUs), same shape as `img`
     """
     threshold = float(threshold)
     if fwhm:
