@@ -184,10 +184,10 @@ def get_fits_fov(hdr: Header) \
         scale = hdr.get('SECPIX')
     else:
         if width and height:
-            ra0, dec0 = wcs.all_pix2world(
-                (hdr['NAXIS1'] - 1)/2, (hdr['NAXIS2'] - 1)/2, 0)
+            ra0, dec0 = wcs.all_pix2world((width - 1)/2, (height - 1)/2, 0)
         else:
             ra0, dec0 = wcs.wcs.crval
+        ra0 %= 360
         ra0 /= 15
         scales = wcs.proj_plane_pixel_scales()
         scale = (scales[0].to('arcsec').value + scales[1].to('arcsec').value)/2

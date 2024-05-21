@@ -400,6 +400,7 @@ def solve_field_glob(engine, xy, flux=None, width=None, height=None,
         xy = numpy.asarray(xy)
         flux = numpy.asarray(flux)
         ra, dec = sol.wcs.all_pix2world(xy[:, 0], xy[:, 1], 1)
+        ra %= 360
         ra /= 15
         radius = (dec.max() - dec.min())/2
         for ra0, dec0, r0 in engine.globs:
