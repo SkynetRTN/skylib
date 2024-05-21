@@ -255,6 +255,7 @@ def get_transform_wcs(src_wcs: WCS, dst_wcs: WCS,
     dst_y += 1
 
     a, d = dst_wcs.all_pix2world(dst_x, dst_y, 1)
+    a %= 360  # safeguard against CRVAL1 out of [0, 360) range
     src_x, src_y = src_wcs.all_world2pix(a, d, 1, quiet=True)
 
     return get_transform_stars(
