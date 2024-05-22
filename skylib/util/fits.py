@@ -159,8 +159,10 @@ def get_fits_fov(hdr: Header) \
     # noinspection PyBroadException
     try:
         wcs = WCS(hdr, relax=True)
-        if not wcs.has_celestial:
-            raise Exception()
+        if wcs.has_celestial:
+            wcs.wcs.crval[0] %= 360
+        else:
+            raise ValueError()
     except Exception:
         # No valid WCS in the header; try using MaxIm fields
         for name in ('OBJRA', 'TELRA', 'RA'):
