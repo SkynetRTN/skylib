@@ -28,7 +28,7 @@ __all__ = ['centroid_iraf', 'centroid_iraf_masked', 'centroid_psf', 'centroid_so
 MAX_FLOAT = sys.float_info.max
 
 
-@njit(parallel=True, cache=True)
+@njit(nogil=True, parallel=True, cache=True)
 def centroid_iraf(data: np.ndarray, x: np.ndarray, y: np.ndarray, radius: np.ndarray, tol: float = 0.2,
                   max_iter: int = 10) -> None:
     """
@@ -96,7 +96,7 @@ def centroid_iraf(data: np.ndarray, x: np.ndarray, y: np.ndarray, radius: np.nda
             y[i] = yc + 1
 
 
-@njit(parallel=True, cache=True)
+@njit(nogil=True, parallel=True, cache=True)
 def centroid_iraf_masked(data: np.ndarray, mask: np.ndarray, x: np.ndarray, y: np.ndarray, radius: np.ndarray,
                          tol: float = 0.2, max_iter: int = 10) -> None:
     """
