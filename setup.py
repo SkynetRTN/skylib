@@ -228,12 +228,6 @@ elif ccompiler == 'cygwin':
     # Cygwin does not define __int64
     an_engine_ext.define_macros += [('__int64', 'long long')]
 
-rcrlib_ext = Extension(
-    name='skylib.util.RCRLib._RCRLib',
-    sources=glob('skylib/util/RCRLib/*.c??'),
-    extra_compile_args=['-std=c++11'],
-)
-
 numpy.distutils.core.setup(
     name='SkyLib',
     version='0.2.0',
@@ -244,7 +238,7 @@ numpy.distutils.core.setup(
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine',
         'skylib.enhancement', 'skylib.extraction', 'skylib.io',
         'skylib.photometry', 'skylib.sonification', 'skylib.util'],
-    ext_modules=[an_engine_ext, rcrlib_ext],
+    ext_modules=[an_engine_ext],
     package_data={
         'skylib.sonification': ['*.wav'],
         'skylib.astrometry': ['ngc2000.dat'],
