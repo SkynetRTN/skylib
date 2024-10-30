@@ -223,7 +223,7 @@ if ccompiler == 'mingw32':
     ]
     an_engine_ext.include_dirs += [extra, extra + 'regex', extra + 'endian']
     an_engine_ext.extra_compile_args += ['-include', extra + 'an-defs.h']
-    an_engine_ext.define_macros += [('_POSIX', None)]
+    an_engine_ext.define_macros += [('_POSIX', None), ('_POSIX_C_SOURCE', None)]
 elif ccompiler == 'cygwin':
     # Cygwin does not define __int64
     an_engine_ext.define_macros += [('__int64', 'long long')]
