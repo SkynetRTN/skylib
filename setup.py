@@ -66,8 +66,7 @@ if win_platform:
                 self.compiler.customize(self.distribution)
                 self.compiler.customize_cmd(self)
                 self.compiler.show_customization()
-                old_build_clib.build_a_library(
-                    self, build_info, libname, libraries)
+                old_build_clib.build_a_library(self, build_info, libname, libraries)
                 # noinspection PyAttributeOutsideInit
                 self.compiler = save_ccompiler
             else:
@@ -202,8 +201,7 @@ if win_platform:
 
 setup(
     name='SkyLib',
-    version='0.2.0',
-    requires=['numpy(>=1.18)', 'astropy(>=1.2)', 'scipy(>=1.0)', 'sep(==1.0.3)', 'astroscrappy(==1.0.8)'],
+    version='2.0.0',
     provides='skylib',
     packages=[
         'skylib', 'skylib.astrometry', 'skylib.calibration', 'skylib.combine', 'skylib.enhancement',
