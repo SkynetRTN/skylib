@@ -12,7 +12,7 @@ project(
 
 py = import('python').find_installation(pure: false)
 py_dep = py.dependency()
-#np_incdir = run_command(py, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
+np_incdir = run_command(py, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
 add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
@@ -103,7 +103,7 @@ libs = [
 ]
 
 # Global include directories
-include_dirs = []#[np_incdir]
+include_dirs = [np_incdir]
 foreach f: ['include', 'include/astrometry', 'gsl-an', 'libkd', 'qfits-an', 'util']
     include_dirs += anet + f
 endforeach
