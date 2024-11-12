@@ -10,8 +10,23 @@ project(
     ]
 )
 
+tparty = 'skylib/thirdparty/'
+anet = tparty + 'astrometry.net/'
+extra = tparty + 'anet_extra/'
+gsl = anet + 'gsl-an/'
+
 py = import('python').find_installation(pure: false)
 py_dep = py.dependency()
+
+add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
+add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
+
+windows = host_machine.system() == 'windows'
+
+if windows
+    add_project_link_arguments(['-lucrt', '-static-libgcc', '-static', '-liconv', '-lws2_32'], language: 'c')
+    add_project_arguments(['-include', extra + 'an-defs.h', '-D_POSIX', '-D_POSIX_C_SOURCE'], language: 'c')
+endif
 
 foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color', 'skylib/combine', 'skylib/enhancement',
             'skylib/extraction', 'skylib/io', 'skylib/photometry', 'skylib/sonification', 'skylib/util']
@@ -25,25 +40,20 @@ py.install_sources(['skylib/astrometry/ngc2000.dat'], subdir: 'skylib/astrometry
 py.install_sources(['skylib/sonification/start.wav', 'skylib/sonification/stop.wav'], subdir: 'skylib/sonification')
 py.install_sources(['scripts/fits2wav.py'], subdir: 'skylib/scripts')
 
-add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
-add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
-
-windows = host_machine.system() == 'windows'
-
-tparty = 'skylib/thirdparty/'
-anet = tparty + 'astrometry.net/'
-extra = tparty + 'anet_extra/'
-gsl = anet + 'gsl-an/'
-
 # Astrometry.net source files
 an_engine_sources = ['skylib/astrometry/an_engine_wrap.c']
 foreach fn: [
         'an-endian', 'bl', 'codekd', 'datalog', 'errors', 'fit-wcs', 'fitsbin', 'fitsfile', 'fitsioutils', 'fitstable',
-        'gslutils', 'healpix', 'index', 'ioutils', 'log', 'matchobj', 'mathutil', 'permutedsort', 'quadfile', 'sip',
-        'sip-utils', 'starkd', 'starutil', 'starxy', 'tic',
+        'gslutils', 'healpix', 'index', 'log', 'matchobj', 'mathutil', 'permutedsort', 'quadfile', 'sip', 'sip-utils',
+        'starkd', 'starutil', 'starxy', 'tic',
         ]
     an_engine_sources += anet + 'util/' + fn + '.c'
 endforeach
+if windows
+    an_engine_sources += extra + 'ioutils.c'
+else
+    an_engine_sources += anet + 'util/ioutils.c'
+endif
 
 foreach fn: ['quad-utils', 'solver', 'tweak', 'tweak2', 'verify']
     an_engine_sources += anet + 'solver/' + fn + '.c'
@@ -85,6 +95,9 @@ kd_include_dirs = [extra + 'anet']
 foreach fn: ['include', 'include/astrometry', 'qfits-an', 'util']
     kd_include_dirs += anet + fn
 endforeach
+if windows
+    kd_include_dirs += [extra, extra + 'regex']
+endif
 
 qfits_an_sources = run_command(
     py,
@@ -94,6 +107,23 @@ qfits_an_include_dirs = []
 foreach fn: ['include', 'include/astrometry', 'qfits-an', 'util']
     qfits_an_include_dirs += anet + fn
 endforeach
+qfits_an_c_args = []
+if windows
+    # Fix index file corruption in anqfits.c on Windows
+    sources = []
+    foreach f: qfits_an_sources
+        if not (f.contains('anqfits.c') or f.contains('qfits_memory.c'))
+            sources += f
+        endif
+    endforeach
+    qfits_an_sources = sources + [extra + 'qfits-an/anqfits.c', extra + 'qfits-an/qfits_memory.c']
+
+    qfits_an_include_dirs += [extra, extra + 'regex', extra + 'qfits-an', extra + 'endian']
+    qfits_an_c_args += [
+        '-include', extra + 'qfits-an/qfits-an-sys-stat.h',
+        '-D_POSIX_THREAD_SAFE_FUNCTIONS',  # No localtime_r()
+    ]
+endif
 
 libs = [
     static_library(
@@ -110,8 +140,35 @@ libs = [
         'qfits-an',
         qfits_an_sources,
         include_directories: include_directories(qfits_an_include_dirs),
+        c_args: qfits_an_c_args,
     ),
 ]
+if windows
+    posix_sources = run_command(
+        py,
+        ['-c', 'from glob import glob; print("\\n".join(glob("' + extra + 'sys/*.c")), end="")'],
+        check: true).stdout().split('\n')
+    posix_sources += extra + 'an-defs.c'
+    regex_sources = run_command(
+        py,
+        ['-c', 'from glob import glob; print("\\n".join(glob("' + extra + 'regex/*.c")), end="")'],
+        check: true
+    ).stdout().split('\n')
+    libs += [
+        static_library(
+            'posix',
+            posix_sources,
+            include_directories: include_directories(extra + 'sys'),
+            c_args: ['-D_POSIX'],
+        ),
+        static_library(
+            'regex',
+            regex_sources,
+            include_directories: include_directories(extra + 'regex'),
+            c_args: ['-D_GNU_SOURCE'],
+        ),
+    ]
+endif
 
 # Global include directories
 np_incdir = run_command(py, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
@@ -121,12 +178,14 @@ foreach f: ['include', 'include/astrometry', 'gsl-an', 'libkd', 'qfits-an', 'uti
 endforeach
 include_dirs += extra + 'anet'
 
-extra_link_args = []
 if windows
-    extra_link_args += ['-static-libgcc', '-static-libstdc++', '-static']
+    cc = meson.get_compiler('c')
+    assert(cc.get_id() == 'gcc', 'Astrometry.net extension can only be compiled with mingw-w64 on Windows')
+
+    include_dirs += [extra, extra + 'regex', extra + 'endian']
 endif
 
-py.extension_module(
+an_engine = py.extension_module(
     '_an_engine',
     sources: an_engine_sources,
     dependencies: [py_dep],
@@ -134,6 +193,5 @@ py.extension_module(
     link_with: libs,
     include_directories: include_directories(include_dirs),
     install: true,
-    c_args: extra_link_args,
     subdir: 'skylib/astrometry',
 )
