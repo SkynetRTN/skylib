@@ -24,6 +24,9 @@ requires-python = ">=3.10,<3.11"
 readme = "README.md"
 license = {text = "MIT"}
 
+[project.scripts]
+fits2wav = "scripts.fits2wav:main"
+
 [build-system]
 requires = [
     "meson-python>=0.17.1",

@@ -59,7 +59,6 @@ install_data(
     'skylib/sonification/start.wav',
     'skylib/sonification/stop.wav',
 )
-install_data('scripts/fits2wav.py', install_dir: 'bin')
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
 add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
