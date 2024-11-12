@@ -13,11 +13,17 @@ project(
 py = import('python').find_installation(pure: false)
 py_dep = py.dependency()
 
-py_sources = files(
+py.install_sources(
     'skylib/__init__.py',
+    install_dir: 'skylib'
+)
+py.install_sources(
     'skylib/astrometry/__init__.py',
     'skylib/astrometry/an_engine.py',
     'skylib/astrometry/main.py',
+    install_dir: 'skylib/astrometry'
+)
+py.install_sources(
     'skylib/calibration/__init__.py',
     'skylib/calibration/background.py',
     'skylib/calibration/bias.py',
@@ -25,8 +31,14 @@ py_sources = files(
     'skylib/calibration/cosmic.py',
     'skylib/calibration/dark.py',
     'skylib/calibration/flat.py',
+    install_dir: 'skylib/calibration'
+)
+py.install_sources(
     'skylib/color/__init__.py',
     'skylib/color/radio.py',
+    install_dir: 'skylib/color'
+)
+py.install_sources(
     'skylib/combine/__init__.py',
     'skylib/combine/alignment.py',
     'skylib/combine/cropping.py',
@@ -35,29 +47,55 @@ py_sources = files(
     'skylib/combine/smart_stacking.py',
     'skylib/combine/stacking.py',
     'skylib/combine/util.py',
+    install_dir: 'skylib/combine'
+)
+py.install_sources(
     'skylib/enhancement/__init__.py',
     'skylib/enhancement/wavelet.py',
+    install_dir: 'skylib/enhancement'
+)
+py.install_sources(
     'skylib/extraction/__init__.py',
     'skylib/extraction/centroiding.py',
     'skylib/extraction/main.py',
+    install_dir: 'skylib/extraction'
+)
+py.install_sources(
     'skylib/io/__init__.py',
     'skylib/io/conversion.py',
+    install_dir: 'skylib/io'
+)
+py.install_sources(
     'skylib/photometry/__init__.py',
     'skylib/photometry/aperture.py',
     'skylib/photometry/aperture_numba.py',
+    install_dir: 'skylib/photometry'
+)
+py.install_sources(
     'skylib/sonification/__init__.py',
     'skylib/sonification/main.py',
+    install_dir: 'skylib/sonification'
+)
+py.install_sources(
     'skylib/util/__init__.py',
     'skylib/util/angle.py',
     'skylib/util/fits.py',
     'skylib/util/overlap.py',
     'skylib/util/stats.py',
+    install_dir: 'skylib/util'
 )
-py.install_sources(py_sources)
+py.install_sources(
+    'scripts/fits2wav.py',
+    install_dir: 'skylib/scripts'
+)
 install_data(
     'skylib/astrometry/ngc2000.dat',
+    install_dir: 'skylib/astrometry'
+)
+install_data(
     'skylib/sonification/start.wav',
     'skylib/sonification/stop.wav',
+    install_dir: 'skylib/sonification'
 )
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
