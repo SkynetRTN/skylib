@@ -28,22 +28,12 @@ license = {text = "MIT"}
 requires = [
     "meson-python>=0.17.1",
     "numpy==1.26.4",
+    "wheel",
 ]
 build-backend = "mesonpy"
 
-[tool.meson-python.args]
-setup = ['--vsenv']  # For Windows
-
 [tool.pdm]
 distribution = true
-
-#[tool.pdm.dev-dependencies]
-#build = [
-#    "setuptools",
-#    "meson-python",
-#    "ninja",
-#    "numpy==1.26.4",
-#]
 
 [[tool.pdm.autoexport]]
 filename = "requirements.txt"

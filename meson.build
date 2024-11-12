@@ -5,14 +5,61 @@ project(
     meson_version: '>=1.6.0',
     default_options: [
         'buildtype=release',
-        'c_std=c11',
+        'c_std=c99',
         'warning_level=3',
     ]
 )
 
 py = import('python').find_installation(pure: false)
 py_dep = py.dependency()
-np_incdir = run_command(py, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
+
+py_sources = files(
+    'skylib/__init__.py',
+    'skylib/astrometry/__init__.py',
+    'skylib/astrometry/an_engine.py',
+    'skylib/astrometry/main.py',
+    'skylib/calibration/__init__.py',
+    'skylib/calibration/background.py',
+    'skylib/calibration/bias.py',
+    'skylib/calibration/cosmetic.py',
+    'skylib/calibration/cosmic.py',
+    'skylib/calibration/dark.py',
+    'skylib/calibration/flat.py',
+    'skylib/color/__init__.py',
+    'skylib/color/radio.py',
+    'skylib/combine/__init__.py',
+    'skylib/combine/alignment.py',
+    'skylib/combine/cropping.py',
+    'skylib/combine/mosaicing.py',
+    'skylib/combine/pattern_matching.py',
+    'skylib/combine/smart_stacking.py',
+    'skylib/combine/stacking.py',
+    'skylib/combine/util.py',
+    'skylib/enhancement/__init__.py',
+    'skylib/enhancement/wavelet.py',
+    'skylib/extraction/__init__.py',
+    'skylib/extraction/centroiding.py',
+    'skylib/extraction/main.py',
+    'skylib/io/__init__.py',
+    'skylib/io/conversion.py',
+    'skylib/photometry/__init__.py',
+    'skylib/photometry/aperture.py',
+    'skylib/photometry/aperture_numba.py',
+    'skylib/sonification/__init__.py',
+    'skylib/sonification/main.py',
+    'skylib/util/__init__.py',
+    'skylib/util/angle.py',
+    'skylib/util/fits.py',
+    'skylib/util/overlap.py',
+    'skylib/util/stats.py',
+)
+py.install_sources(py_sources)
+install_data(
+    'skylib/astrometry/ngc2000.dat',
+    'skylib/sonification/start.wav',
+    'skylib/sonification/stop.wav',
+)
+install_data('scripts/fits2wav.py', install_dir: 'bin')
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
 add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
@@ -103,6 +150,7 @@ libs = [
 ]
 
 # Global include directories
+np_incdir = run_command(py, ['-c', 'import numpy; print(numpy.get_include())'], check: true).stdout().strip()
 include_dirs = [np_incdir]
 foreach f: ['include', 'include/astrometry', 'gsl-an', 'libkd', 'qfits-an', 'util']
     include_dirs += anet + f
@@ -114,10 +162,11 @@ if windows
     extra_link_args += ['-static-libgcc', '-static-libstdc++', '-static']
 endif
 
-an_engine = py.extension_module(
+py.extension_module(
     'skylib.astrometry._an_engine',
     sources: an_engine_sources,
     dependencies: [py_dep],
+    limited_api: '3.10',
     link_with: libs,
     include_directories: include_directories(include_dirs),
     install: true,
