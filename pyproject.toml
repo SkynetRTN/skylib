@@ -25,7 +25,7 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [project.scripts]
-fits2wav = "scripts.fits2wav:main"
+fits2wav = "skylib.scripts.fits2wav:main"
 
 [build-system]
 requires = [
