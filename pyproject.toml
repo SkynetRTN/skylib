@@ -1,0 +1,50 @@
+[project]
+name = "skylib"
+version = "2.0.0"
+description = "A Python library for analyzing and processing astronomical image data"
+authors = [
+    {name = "Vladimir Kouprianov", email = "vkoupr@unc.edu"},
+]
+dependencies = [
+    "astroscrappy>=1.2.0",
+    "astropy>=6.1.5,<7",
+    "astroquery>=0.4.7",
+    "llvmlite>=0.42.0",
+    "matplotlib>=3.9.0",
+    "numba>=0.59.1",
+    "numpy==1.26.4",
+    "opencv-contrib-python-headless>=4.10",
+    "photutils>=1.12.0",
+    "pillow>=10.3.0",
+    "scipy>=1.14.1,<2.0.0",
+    "sep>=1.2.1",
+    "tbb==2021.10.0",
+]
+requires-python = ">=3.10,<3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = [
+    "meson-python>=0.17.1",
+    "numpy==1.26.4",
+]
+build-backend = "mesonpy"
+
+[tool.meson-python.args]
+setup = ['--vsenv']  # For Windows
+
+[tool.pdm]
+distribution = true
+
+#[tool.pdm.dev-dependencies]
+#build = [
+#    "setuptools",
+#    "meson-python",
+#    "ninja",
+#    "numpy==1.26.4",
+#]
+
+[[tool.pdm.autoexport]]
+filename = "requirements.txt"
+without-hashes = true
