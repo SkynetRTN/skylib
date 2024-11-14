@@ -1,6 +1,6 @@
 [project]
 name = "skylib"
-version = "2.0.0"
+dynamic = ["version"]
 description = "A Python library for analyzing and processing astronomical image data"
 authors = [
     {name = "Vladimir Kouprianov", email = "vkoupr@unc.edu"},

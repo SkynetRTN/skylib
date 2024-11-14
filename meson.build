@@ -1,7 +1,11 @@
 project(
     'skylib',
     'c',
-    version: '2.0.0',
+    version: run_command(
+        'python',
+        ['-c', 'import sys; sys.path = ["."]; from skylib import __version__; print(__version__, end="")'],
+        check: true
+    ).stdout().strip(),
     meson_version: '>=1.6.0',
     default_options: [
         'buildtype=release',
@@ -10,13 +14,13 @@ project(
     ]
 )
 
+py = import('python').find_installation(pure: false)
+py_dep = py.dependency()
+
 tparty = 'skylib/thirdparty/'
 anet = tparty + 'astrometry.net/'
 extra = tparty + 'anet_extra/'
 gsl = anet + 'gsl-an/'
-
-py = import('python').find_installation(pure: false)
-py_dep = py.dependency()
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
 add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
