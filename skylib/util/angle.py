@@ -8,7 +8,7 @@ import numpy as np
 from numba import njit
 
 
-__all__ = ['angdist', 'average_radec']
+__all__ = ['angdist', 'average_radec', 'airmass_for_el_rad']
 
 
 @njit(nogil=True, cache=True)
@@ -48,3 +48,16 @@ def average_radec(radec: np.ndarray) -> tuple[float, float]:
     y = (np.sin(ra)*cos_dec).mean()
     z = np.sin(dec).mean()
     return np.arctan2(y, x)*(12/np.pi) % 24, np.rad2deg(np.arctan2(z, np.hypot(x, y)))
+
+
+@njit(nogil=True, cache=True)
+def airmass_for_el_rad(h: float) -> float:
+    """
+    Return airmass for the given elevation
+
+    :param h: elevation in radians
+
+    :return: airmass
+    """
+    sec_z = 1/np.sin(h)
+    return sec_z - 0.0018167*(sec_z - 1) - 0.002875*(sec_z - 1)**2 - 0.0008083*(sec_z - 1)**3
