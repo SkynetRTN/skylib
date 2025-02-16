@@ -67,7 +67,7 @@ def _calc_scaling(scaling: str,
             else:
                 data = data.ravel()
             min_val = data.min(initial=0)
-            avg = np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1) .astype(np.int32))) + min_val
+            avg = np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))) + min_val
 
         elif scaling == 'histogram':
             # Approximate histogram peak and tail matching: subtract mode, then divide by average
@@ -75,8 +75,9 @@ def _calc_scaling(scaling: str,
                 data = data.compressed()
             else:
                 data = data.ravel()
-            ofs = -np.median(data)
-            avg = (data + ofs).mean()
+            min_val = data.min(initial=0)
+            ofs = -np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))) - min_val
+            avg = np.median(data + ofs)
 
         else:
             raise ValueError(f'Unknown scaling mode "{scaling}"')
