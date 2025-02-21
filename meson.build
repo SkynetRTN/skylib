@@ -33,7 +33,7 @@ if windows
 endif
 
 foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color', 'skylib/combine', 'skylib/enhancement',
-            'skylib/extraction', 'skylib/io', 'skylib/photometry', 'skylib/sonification', 'skylib/util']
+            'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry', 'skylib/sonification', 'skylib/util']
     sources = run_command(
         py, ['-c', 'from glob import glob; print("\\n".join(glob("' + p + '/*.py")), end="")'], check: true
     ).stdout().split('\n')

@@ -2,13 +2,11 @@
 Helper functions for working with angular quantities
 """
 
-from typing import Iterable
-
 import numpy as np
 from numba import njit
 
 
-__all__ = ['angdist', 'average_radec', 'airmass_for_el_rad']
+__all__ = ['angdist', 'average_radec', 'airmass_for_el']
 
 
 @njit(nogil=True, cache=True)
@@ -51,13 +49,12 @@ def average_radec(radec: np.ndarray) -> tuple[float, float]:
 
 
 @njit(nogil=True, cache=True)
-def airmass_for_el_rad(h: float) -> float:
+def airmass_for_el(h: float) -> float:
     """
-    Return airmass for the given elevation
+    Return airmass for the given elevation, as per Pickering (2002)
 
-    :param h: elevation in radians
+    :param h: elevation in degrees
 
     :return: airmass
     """
-    sec_z = 1/np.sin(h)
-    return sec_z - 0.0018167*(sec_z - 1) - 0.002875*(sec_z - 1)**2 - 0.0008083*(sec_z - 1)**3
+    return 1/np.sin(np.deg2rad(h + 244/(165 + 47*h**1.1)))
