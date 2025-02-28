@@ -308,7 +308,7 @@ def detect_defects(img: np.ndarray, m_col: int = 10, nu_col: int = 0,
         img = img.astype(np.float64)
     if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
-        img = img.byteswap().newbyteorder()
+        img = img.astype(img.dtype.newbyteorder())
 
     col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
     pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
@@ -482,7 +482,7 @@ def correct_cosmetic(
         img = img.astype(np.float64)
     if not img.dtype.isnative:
         # Non-native byte order is not supported by Numba
-        img = img.byteswap().newbyteorder()
+        img = img.astype(img.dtype.newbyteorder())
 
     if col_mask is None:
         col_mask = flag_columns(flag_horiz(img, m=m_col, nu=nu_col, z=z))
