@@ -410,7 +410,7 @@ def _do_combine(input_data: list[callable],
                 datacube = datacube.astype(np.float64)
             elif not datacube.dtype.isnative:
                 # Non-native byte order is not supported by Numba
-                datacube = datacube.byteswap().newbyteorder()
+                datacube = datacube.astype(datacube.dtype.newbyteorder())
             chauvenet(
                 datacube.data, datacube.mask, min_vals=min_keep,
                 mean_type=1 if rejection == 'rcr' else 0,

@@ -23,7 +23,7 @@ def sep_compatible(img: np.ndarray | np.ma.MaskedArray) -> np.ndarray | np.ma.Ma
     """
     # Ensure native byte order
     if not img.dtype.isnative:
-        img = img.byteswap().newbyteorder()
+        img = img.astype(img.dtype.newbyteorder())
 
     # Convert to float32 unless the image is float64
     if img.dtype.char not in ('f', 'd'):
