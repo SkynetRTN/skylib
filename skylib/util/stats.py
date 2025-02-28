@@ -652,7 +652,7 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
     ndim = data.ndim
     assert 1 <= ndim <= 3
     if mask is None:
-        mask = np.zeros(data.shape, np.bool8)
+        mask = np.zeros(data.shape, np.bool)
 
     min_vals = max(min_vals, 2)
 
