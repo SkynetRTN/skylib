@@ -49,7 +49,7 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
     """
     h, w = img.shape
     s = min(2*m + 1, w)
-    mask = np.zeros(img.shape, np.bool8)
+    mask = np.zeros(img.shape, np.bool)
     if z > 1:
         binned_img = img.copy()  # will modify binned image in place
     else:
@@ -98,7 +98,7 @@ def flag_horiz(img: np.ndarray, m: int = 10, nu: int = 0, z: int = 1) \
                 elif d < 0:
                     ofs -= d
                     left += d
-                rej = np.zeros(s, np.bool8)
+                rej = np.zeros(s, np.bool)
                 chauvenet1(
                     binned_img[i, left:left+s], rej, nu=nu, min_vals=2,
                     mean_type=1, mean_override=None, sigma_type=1,
@@ -140,7 +140,7 @@ def flag_columns(mask: np.ndarray) -> np.ndarray:
         for i in range(mask.shape[0]):
             if mask[i, j]:
                 nrej_all[j] += 1
-    col_mask = np.zeros(nrej_all.shape, np.bool8)
+    col_mask = np.zeros(nrej_all.shape, np.bool)
     mu, sigma = chauvenet1(
         nrej_all, col_mask, nu=0, min_vals=10, mean_type=1, mean_override=None,
         sigma_type=1, sigma_override=None, clip_lo=False, clip_hi=True,
@@ -213,7 +213,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
         bad columns
     """
     # Get indices of columns containing at least one flagged pixel
-    bad_cols = np.zeros(col_mask.shape[1], np.bool8)
+    bad_cols = np.zeros(col_mask.shape[1], np.bool)
     for j in prange(col_mask.shape[1]):
         for i in range(col_mask.shape[0]):
             if col_mask[i, j]:
@@ -271,7 +271,7 @@ def flag_pixels(img: np.ndarray, col_mask: np.ndarray, m: int = 2,
             if npixels < 3:
                 mask[row, col] = True
             else:
-                rej = np.zeros(npixels, np.bool8)
+                rej = np.zeros(npixels, np.bool)
                 if chauvenet1(
                         pixel_set[:npixels], rej, nu=nu, min_vals=2,
                         mean_type=1, mean_override=None, sigma_type=1,
@@ -493,7 +493,7 @@ def correct_cosmetic(
                 f'{img.shape[1]}x{img.shape[0]}, got '
                 f'{col_mask.shape[1]}x{col_mask.shape[0]}')
         if col_mask.dtype.name != 'bool':
-            col_mask = col_mask.astype(np.bool8)
+            col_mask = col_mask.astype(np.bool)
 
     if pixel_mask is None:
         pixel_mask = flag_pixels(img, col_mask, m=m_pixel, nu=nu_pixel)
@@ -504,7 +504,7 @@ def correct_cosmetic(
                 f'{img.shape[1]}x{img.shape[0]}, got '
                 f'{col_mask.shape[1]}x{col_mask.shape[0]}')
         if pixel_mask.dtype.name != 'bool':
-            pixel_mask = pixel_mask.astype(np.bool8)
+            pixel_mask = pixel_mask.astype(np.bool)
 
     return correct_cols_and_pixels(
         img, col_mask, pixel_mask, m_col=m_corr_col, m_pixel=m_corr_pixel)
