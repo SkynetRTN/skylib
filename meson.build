@@ -23,7 +23,7 @@ extra = tparty + 'anet_extra/'
 gsl = anet + 'gsl-an/'
 
 add_project_arguments('-DNPY_NO_DEPRECATED_API=0', language : 'c')
-add_project_arguments('-DNPY_TARGET_VERSION=NPY_1_26_API_VERSION', language : 'c')
+add_project_arguments('-DNPY_TARGET_VERSION=NPY_2_1_API_VERSION', language : 'c')
 
 windows = host_machine.system() == 'windows'
 
