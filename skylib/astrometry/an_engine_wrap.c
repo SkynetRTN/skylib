@@ -3285,7 +3285,7 @@ static swig_module_info swig_module = {swig_types, 53, 0, 0, 0, 0};
 
 
 #define SWIG_FILE_WITH_INIT 1
-#define NPY_NO_DEPRECATED_API 8
+#define NPY_NO_DEPRECATED_API NPY_2_1_API_VERSION
 #include <time.h>
 #include <limits.h>
 #include <numpy/arrayobject.h>
