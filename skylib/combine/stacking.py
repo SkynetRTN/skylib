@@ -77,7 +77,7 @@ def _calc_scaling(scaling: str,
                 data = data.ravel()
             min_val = data.min(initial=0)
             ofs = -np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))) - min_val
-            avg = np.median(data) + ofs
+            avg = data.mean() + ofs
 
         else:
             raise ValueError(f'Unknown scaling mode "{scaling}"')
