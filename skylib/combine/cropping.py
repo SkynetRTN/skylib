@@ -1,8 +1,9 @@
 """
 Automatic cropping.
 
-:func:`~get_auto_crop()`: obtain the largest-area axis-aligned rectangle
-enclosed in the non-masked area of the image.
+:func:`~get_auto_crop()`: obtain the largest-area axis-aligned rectangle enclosed in the non-masked area of the image.
+
+:func:`~get_edge_crop()`: obtain the smallest axis-aligned rectangle containing all non-masked pixels.
 """
 
 from typing import Tuple
@@ -11,7 +12,7 @@ import numpy as np
 from numba import njit
 
 
-__all__ = ['get_auto_crop']
+__all__ = ['get_auto_crop', 'get_edge_crop']
 
 
 @njit(nogil=True, cache=True)
@@ -74,3 +75,24 @@ def get_auto_crop(mask: np.ndarray):
     right = mask.shape[1] - 1 - right
     top = mask.shape[0] - 1 - top
     return left, right, bottom, top
+
+
+def get_edge_crop(mask: np.ndarray) -> Tuple[int, int, int, int]:
+    """
+    Return the cropping margins (left, right, bottom, top) for the smallest axis-aligned rectangle containing all
+    non-masked pixels of the image.
+
+    :param mask: 2D array with 1's corresponding to masked elements
+
+    :return: cropping margins (left, right, bottom, top)
+    """
+    h, w = mask.shape
+    y, x = (~mask).nonzero()
+    n = len(x)
+    if not n:
+        # All pixels are masked
+        return 0, w, 0, h
+    if n == w*h:
+        # No masked pixels
+        return 0, 0, 0, 0
+    return x.min(), w - 1 - x.max(), y.min(), h - 1 - y.max()
