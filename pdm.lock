@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:d134df9c5e22f07bcc3aa76afa6d42a20890e63d1eb18f81d5da921b24283347"
+content_hash = "sha256:80ee6609c6ad23442ddc5f1054c392849336013087787067620cfa8f4bfea9e7"
 
 [[metadata.targets]]
 requires_python = ">=3.10,<3.13"
@@ -16,6 +16,7 @@ version = "6.1.7"
 requires_python = ">=3.10"
 summary = "Astronomy and astrophysics core library"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "PyYAML>=3.13",
     "astropy-iers-data>=0.2024.10.28.0.34.7",
@@ -54,6 +55,7 @@ version = "0.2024.11.25.0.34.48"
 requires_python = ">=3.8"
 summary = "IERS Earth Rotation and Leap Second tables for the astropy core package"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "astropy_iers_data-0.2024.11.25.0.34.48-py3-none-any.whl", hash = "sha256:dd8f1c3e72719a896b86a62b921c464bef2675ad02c6f0f0b8e6bec38eb41456"},
     {file = "astropy_iers_data-0.2024.11.25.0.34.48.tar.gz", hash = "sha256:690702c30886e7a3509c4dc39e076c8f94a5cf923c1a49c26455e6d0a5aa5356"},
@@ -61,10 +63,11 @@ files = [
 
 [[package]]
 name = "astroquery"
-version = "0.4.9.post1"
+version = "0.4.10"
 requires_python = ">=3.9"
 summary = "Functions and classes to access online astronomical data resources"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "astropy>=5.0",
     "beautifulsoup4>=4.8",
@@ -75,8 +78,8 @@ dependencies = [
     "requests>=2.19",
 ]
 files = [
-    {file = "astroquery-0.4.9.post1-py3-none-any.whl", hash = "sha256:d3e4af26bc57ce1822c1a89963f5096e89f3b8eb414341e0643cb235fee32f50"},
-    {file = "astroquery-0.4.9.post1.tar.gz", hash = "sha256:5c116bf19036d71e9321d4a049875af55349a4888e24844558fe9984b9f57197"},
+    {file = "astroquery-0.4.10-py3-none-any.whl", hash = "sha256:43a0255766bfe1f7a86f528e19832d1a6428400bda348e9f0ec970cac2ee81ec"},
+    {file = "astroquery-0.4.10.tar.gz", hash = "sha256:eacd91e9da378e641740fbc3123850daa83ba0926a6fff4c40ccbf5dc6d5a406"},
 ]
 
 [[package]]
@@ -85,6 +88,7 @@ version = "1.2.0"
 requires_python = ">=3.9"
 summary = "Speedy Cosmic Ray Annihilation Package in Python"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "astropy",
     "numpy",
@@ -114,7 +118,7 @@ version = "1.2.0"
 requires_python = ">=3.8"
 summary = "Backport of CPython tarfile module"
 groups = ["default"]
-marker = "python_version < \"3.12\""
+marker = "python_version >= \"3.10\" and python_version < \"3.12\""
 files = [
     {file = "backports.tarfile-1.2.0-py3-none-any.whl", hash = "sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34"},
     {file = "backports_tarfile-1.2.0.tar.gz", hash = "sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991"},
@@ -126,6 +130,7 @@ version = "4.12.3"
 requires_python = ">=3.6.0"
 summary = "Screen-scraping library"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "soupsieve>1.2",
 ]
@@ -140,6 +145,7 @@ version = "2024.8.30"
 requires_python = ">=3.6"
 summary = "Python package for providing Mozilla's CA Bundle."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "certifi-2024.8.30-py3-none-any.whl", hash = "sha256:922820b53db7a7257ffbda3f597266d435245903d80737e34f8a45ff3e3230d8"},
     {file = "certifi-2024.8.30.tar.gz", hash = "sha256:bec941d2aa8195e248a60b31ff9f0558284cf01a52591ceda73ea9afffd69fd9"},
@@ -151,7 +157,7 @@ version = "1.17.1"
 requires_python = ">=3.8"
 summary = "Foreign Function Interface for Python calling C code."
 groups = ["default"]
-marker = "platform_python_implementation != \"PyPy\" and sys_platform == \"linux\""
+marker = "platform_python_implementation != \"PyPy\" and sys_platform == \"linux\" and python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "pycparser",
 ]
@@ -200,6 +206,7 @@ version = "3.4.0"
 requires_python = ">=3.7.0"
 summary = "The Real First Universal Charset Detector. Open, modern and actively maintained alternative to Chardet."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "charset_normalizer-3.4.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:4f9fc98dad6c2eaa32fc3af1417d95b5e3d08aff968df0cd320066def971f9a6"},
     {file = "charset_normalizer-3.4.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:0de7b687289d3c1b3e8660d0741874abe7888100efe14bd0f9fd7141bcbda92b"},
@@ -256,6 +263,7 @@ version = "1.3.1"
 requires_python = ">=3.10"
 summary = "Python library for calculating contours of 2D quadrilateral grids"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy>=1.23",
 ]
@@ -302,7 +310,7 @@ version = "43.0.3"
 requires_python = ">=3.7"
 summary = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
 groups = ["default"]
-marker = "sys_platform == \"linux\""
+marker = "python_version >= \"3.10\" and python_version < \"3.13\" and sys_platform == \"linux\""
 dependencies = [
     "cffi>=1.12; platform_python_implementation != \"PyPy\"",
 ]
@@ -338,6 +346,7 @@ version = "0.12.1"
 requires_python = ">=3.8"
 summary = "Composable style cycles"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30"},
     {file = "cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c"},
@@ -349,6 +358,7 @@ version = "4.55.0"
 requires_python = ">=3.8"
 summary = "Tools to manipulate font files"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "fonttools-4.55.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:51c029d4c0608a21a3d3d169dfc3fb776fde38f00b35ca11fdab63ba10a16f61"},
     {file = "fonttools-4.55.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:bca35b4e411362feab28e576ea10f11268b1aeed883b9f22ed05675b1e06ac69"},
@@ -384,6 +394,7 @@ version = "1.1"
 requires_python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
 summary = "HTML parser based on the WHATWG HTML specification"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "six>=1.9",
     "webencodings",
@@ -399,6 +410,7 @@ version = "3.10"
 requires_python = ">=3.6"
 summary = "Internationalized Domain Names in Applications (IDNA)"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "idna-3.10-py3-none-any.whl", hash = "sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3"},
     {file = "idna-3.10.tar.gz", hash = "sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9"},
@@ -410,7 +422,7 @@ version = "8.5.0"
 requires_python = ">=3.8"
 summary = "Read metadata from Python packages"
 groups = ["default"]
-marker = "python_version < \"3.12\""
+marker = "python_version >= \"3.10\" and python_version < \"3.12\""
 dependencies = [
     "typing-extensions>=3.6.4; python_version < \"3.8\"",
     "zipp>=3.20",
@@ -426,6 +438,7 @@ version = "3.4.0"
 requires_python = ">=3.8"
 summary = "Utility functions for Python class constructs"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "more-itertools",
 ]
@@ -440,6 +453,7 @@ version = "6.0.1"
 requires_python = ">=3.8"
 summary = "Useful decorators and context managers"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "backports-tarfile; python_version < \"3.12\"",
 ]
@@ -454,6 +468,7 @@ version = "4.1.0"
 requires_python = ">=3.8"
 summary = "Functools like those found in stdlib"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "more-itertools",
 ]
@@ -468,7 +483,7 @@ version = "0.8.0"
 requires_python = ">=3.7"
 summary = "Low-level, pure Python DBus protocol wrapper."
 groups = ["default"]
-marker = "sys_platform == \"linux\""
+marker = "python_version >= \"3.10\" and python_version < \"3.13\" and sys_platform == \"linux\""
 files = [
     {file = "jeepney-0.8.0-py3-none-any.whl", hash = "sha256:c0a454ad016ca575060802ee4d590dd912e35c122fa04e70306de3d076cce755"},
     {file = "jeepney-0.8.0.tar.gz", hash = "sha256:5efe48d255973902f6badc3ce55e2aa6c5c3b3bc642059ef3a91247bcfcc5806"},
@@ -479,6 +494,7 @@ name = "jplephem"
 version = "2.22"
 summary = "Use a JPL ephemeris to predict planet positions."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy",
 ]
@@ -493,6 +509,7 @@ version = "25.5.0"
 requires_python = ">=3.8"
 summary = "Store and access your passwords safely."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "SecretStorage>=3.2; sys_platform == \"linux\"",
     "importlib-metadata>=4.11.4; python_version < \"3.12\"",
@@ -514,6 +531,7 @@ version = "1.4.7"
 requires_python = ">=3.8"
 summary = "A fast implementation of the Cassowary constraint solver"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "kiwisolver-1.4.7-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:8a9c83f75223d5e48b0bc9cb1bf2776cf01563e00ade8775ffe13b0b6e1af3a6"},
     {file = "kiwisolver-1.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:58370b1ffbd35407444d57057b57da5d6549d2d854fa30249771775c63b5fe17"},
@@ -578,6 +596,7 @@ version = "0.44.0"
 requires_python = ">=3.10"
 summary = "lightweight wrapper around basic LLVM functionality"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "llvmlite-0.44.0-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:9fbadbfba8422123bab5535b293da1cf72f9f478a65645ecd73e781f962ca614"},
     {file = "llvmlite-0.44.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:cccf8eb28f24840f2689fb1a45f9c0f7e582dd24e088dcf96e424834af11f791"},
@@ -599,10 +618,11 @@ files = [
 
 [[package]]
 name = "matplotlib"
-version = "3.10.0"
+version = "3.10.1"
 requires_python = ">=3.10"
 summary = "Python plotting package"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "contourpy>=1.0.1",
     "cycler>=0.10",
@@ -615,28 +635,28 @@ dependencies = [
     "python-dateutil>=2.7",
 ]
 files = [
-    {file = "matplotlib-3.10.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:2c5829a5a1dd5a71f0e31e6e8bb449bc0ee9dbfb05ad28fc0c6b55101b3a4be6"},
-    {file = "matplotlib-3.10.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:a2a43cbefe22d653ab34bb55d42384ed30f611bcbdea1f8d7f431011a2e1c62e"},
-    {file = "matplotlib-3.10.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:607b16c8a73943df110f99ee2e940b8a1cbf9714b65307c040d422558397dac5"},
-    {file = "matplotlib-3.10.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:01d2b19f13aeec2e759414d3bfe19ddfb16b13a1250add08d46d5ff6f9be83c6"},
-    {file = "matplotlib-3.10.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:5e6c6461e1fc63df30bf6f80f0b93f5b6784299f721bc28530477acd51bfc3d1"},
-    {file = "matplotlib-3.10.0-cp310-cp310-win_amd64.whl", hash = "sha256:994c07b9d9fe8d25951e3202a68c17900679274dadfc1248738dcfa1bd40d7f3"},
-    {file = "matplotlib-3.10.0-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:fd44fc75522f58612ec4a33958a7e5552562b7705b42ef1b4f8c0818e304a363"},
-    {file = "matplotlib-3.10.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:c58a9622d5dbeb668f407f35f4e6bfac34bb9ecdcc81680c04d0258169747997"},
-    {file = "matplotlib-3.10.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:845d96568ec873be63f25fa80e9e7fae4be854a66a7e2f0c8ccc99e94a8bd4ef"},
-    {file = "matplotlib-3.10.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5439f4c5a3e2e8eab18e2f8c3ef929772fd5641876db71f08127eed95ab64683"},
-    {file = "matplotlib-3.10.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:4673ff67a36152c48ddeaf1135e74ce0d4bce1bbf836ae40ed39c29edf7e2765"},
-    {file = "matplotlib-3.10.0-cp311-cp311-win_amd64.whl", hash = "sha256:7e8632baebb058555ac0cde75db885c61f1212e47723d63921879806b40bec6a"},
-    {file = "matplotlib-3.10.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:4659665bc7c9b58f8c00317c3c2a299f7f258eeae5a5d56b4c64226fca2f7c59"},
-    {file = "matplotlib-3.10.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d44cb942af1693cced2604c33a9abcef6205601c445f6d0dc531d813af8a2f5a"},
-    {file = "matplotlib-3.10.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a994f29e968ca002b50982b27168addfd65f0105610b6be7fa515ca4b5307c95"},
-    {file = "matplotlib-3.10.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9b0558bae37f154fffda54d779a592bc97ca8b4701f1c710055b609a3bac44c8"},
-    {file = "matplotlib-3.10.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:503feb23bd8c8acc75541548a1d709c059b7184cde26314896e10a9f14df5f12"},
-    {file = "matplotlib-3.10.0-cp312-cp312-win_amd64.whl", hash = "sha256:c40ba2eb08b3f5de88152c2333c58cee7edcead0a2a0d60fcafa116b17117adc"},
-    {file = "matplotlib-3.10.0-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:81713dd0d103b379de4516b861d964b1d789a144103277769238c732229d7f03"},
-    {file = "matplotlib-3.10.0-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:359f87baedb1f836ce307f0e850d12bb5f1936f70d035561f90d41d305fdacea"},
-    {file = "matplotlib-3.10.0-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ae80dc3a4add4665cf2faa90138384a7ffe2a4e37c58d83e115b54287c4f06ef"},
-    {file = "matplotlib-3.10.0.tar.gz", hash = "sha256:b886d02a581b96704c9d1ffe55709e49b4d2d52709ccebc4be42db856e511278"},
+    {file = "matplotlib-3.10.1-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:ff2ae14910be903f4a24afdbb6d7d3a6c44da210fc7d42790b87aeac92238a16"},
+    {file = "matplotlib-3.10.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:0721a3fd3d5756ed593220a8b86808a36c5031fce489adb5b31ee6dbb47dd5b2"},
+    {file = "matplotlib-3.10.1-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d0673b4b8f131890eb3a1ad058d6e065fb3c6e71f160089b65f8515373394698"},
+    {file = "matplotlib-3.10.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8e875b95ac59a7908978fe307ecdbdd9a26af7fa0f33f474a27fcf8c99f64a19"},
+    {file = "matplotlib-3.10.1-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:2589659ea30726284c6c91037216f64a506a9822f8e50592d48ac16a2f29e044"},
+    {file = "matplotlib-3.10.1-cp310-cp310-win_amd64.whl", hash = "sha256:a97ff127f295817bc34517255c9db6e71de8eddaab7f837b7d341dee9f2f587f"},
+    {file = "matplotlib-3.10.1-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:057206ff2d6ab82ff3e94ebd94463d084760ca682ed5f150817b859372ec4401"},
+    {file = "matplotlib-3.10.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:a144867dd6bf8ba8cb5fc81a158b645037e11b3e5cf8a50bd5f9917cb863adfe"},
+    {file = "matplotlib-3.10.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:56c5d9fcd9879aa8040f196a235e2dcbdf7dd03ab5b07c0696f80bc6cf04bedd"},
+    {file = "matplotlib-3.10.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f69dc9713e4ad2fb21a1c30e37bd445d496524257dfda40ff4a8efb3604ab5c"},
+    {file = "matplotlib-3.10.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:4c59af3e8aca75d7744b68e8e78a669e91ccbcf1ac35d0102a7b1b46883f1dd7"},
+    {file = "matplotlib-3.10.1-cp311-cp311-win_amd64.whl", hash = "sha256:11b65088c6f3dae784bc72e8d039a2580186285f87448babb9ddb2ad0082993a"},
+    {file = "matplotlib-3.10.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:66e907a06e68cb6cfd652c193311d61a12b54f56809cafbed9736ce5ad92f107"},
+    {file = "matplotlib-3.10.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e9b4bb156abb8fa5e5b2b460196f7db7264fc6d62678c03457979e7d5254b7be"},
+    {file = "matplotlib-3.10.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1985ad3d97f51307a2cbfc801a930f120def19ba22864182dacef55277102ba6"},
+    {file = "matplotlib-3.10.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c96f2c2f825d1257e437a1482c5a2cf4fee15db4261bd6fc0750f81ba2b4ba3d"},
+    {file = "matplotlib-3.10.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:35e87384ee9e488d8dd5a2dd7baf471178d38b90618d8ea147aced4ab59c9bea"},
+    {file = "matplotlib-3.10.1-cp312-cp312-win_amd64.whl", hash = "sha256:cfd414bce89cc78a7e1d25202e979b3f1af799e416010a20ab2b5ebb3a02425c"},
+    {file = "matplotlib-3.10.1-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:648406f1899f9a818cef8c0231b44dcfc4ff36f167101c3fd1c9151f24220fdc"},
+    {file = "matplotlib-3.10.1-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:02582304e352f40520727984a5a18f37e8187861f954fea9be7ef06569cf85b4"},
+    {file = "matplotlib-3.10.1-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d3809916157ba871bcdd33d3493acd7fe3037db5daa917ca6e77975a94cef779"},
+    {file = "matplotlib-3.10.1.tar.gz", hash = "sha256:e8d2d0e3881b129268585bf4765ad3ee73a4591d77b9a18c214ac7e3a79fb2ba"},
 ]
 
 [[package]]
@@ -645,6 +665,7 @@ version = "10.5.0"
 requires_python = ">=3.8"
 summary = "More routines for operating on iterables, beyond itertools"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "more-itertools-10.5.0.tar.gz", hash = "sha256:5482bfef7849c25dc3c6dd53a6173ae4795da2a41a80faea6700d9f5846c5da6"},
     {file = "more_itertools-10.5.0-py3-none-any.whl", hash = "sha256:037b0d3203ce90cca8ab1defbbdac29d5f993fc20131f3664dc8d6acfa872aef"},
@@ -656,6 +677,7 @@ version = "0.61.0"
 requires_python = ">=3.10"
 summary = "compiling Python code using LLVM"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "llvmlite<0.45,>=0.44.0dev0",
     "numpy<2.2,>=1.24",
@@ -685,6 +707,7 @@ version = "2.1.3"
 requires_python = ">=3.10"
 summary = "Fundamental package for array computing in Python"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "numpy-2.1.3-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:c894b4305373b9c5576d7a12b473702afdf48ce5369c074ba304cc5ad8730dff"},
     {file = "numpy-2.1.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:b47fbb433d3260adcd51eb54f92a2ffbc90a4595f8970ee00e064c644ac788f5"},
@@ -729,6 +752,7 @@ version = "4.11.0.86"
 requires_python = ">=3.6"
 summary = "Wrapper package for OpenCV python bindings."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy>=1.13.3; python_version < \"3.7\"",
     "numpy>=1.17.0; python_version >= \"3.7\"",
@@ -757,6 +781,7 @@ version = "24.2"
 requires_python = ">=3.8"
 summary = "Core utilities for Python packages"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "packaging-24.2-py3-none-any.whl", hash = "sha256:09abb1bccd265c01f4a3aa3f7a7db064b36514d2cba19a2f694fe6150451a759"},
     {file = "packaging-24.2.tar.gz", hash = "sha256:c228a6dc5e932d346bc5739379109d49e8853dd8223571c7c5b55260edc0b97f"},
@@ -768,6 +793,7 @@ version = "2.0.2"
 requires_python = ">=3.10"
 summary = "An Astropy package for source detection and photometry"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "astropy>=5.3",
     "numpy>=1.24",
@@ -795,6 +821,7 @@ version = "11.1.0"
 requires_python = ">=3.9"
 summary = "Python Imaging Library (Fork)"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "pillow-11.1.0-cp310-cp310-macosx_10_10_x86_64.whl", hash = "sha256:e1abe69aca89514737465752b4bcaf8016de61b3be1397a8fc260ba33321b3a8"},
     {file = "pillow-11.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c640e5a06869c75994624551f45e5506e4256562ead981cce820d5ab39ae2192"},
@@ -845,7 +872,7 @@ version = "2.22"
 requires_python = ">=3.8"
 summary = "C parser in Python"
 groups = ["default"]
-marker = "platform_python_implementation != \"PyPy\" and sys_platform == \"linux\""
+marker = "platform_python_implementation != \"PyPy\" and sys_platform == \"linux\" and python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc"},
     {file = "pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6"},
@@ -857,6 +884,7 @@ version = "2.0.1.5"
 requires_python = ">=3.9"
 summary = "Python bindings for ERFA"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy>=1.19.3",
 ]
@@ -877,6 +905,7 @@ version = "3.2.0"
 requires_python = ">=3.9"
 summary = "pyparsing module - Classes and methods to define and execute parsing grammars"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "pyparsing-3.2.0-py3-none-any.whl", hash = "sha256:93d9577b88da0bbea8cc8334ee8b918ed014968fd2ec383e868fb8afb1ccef84"},
     {file = "pyparsing-3.2.0.tar.gz", hash = "sha256:cbf74e27246d595d9a74b186b810f6fbb86726dbf3b9532efb343f6d7294fe9c"},
@@ -888,6 +917,7 @@ version = "2.9.0.post0"
 requires_python = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
 summary = "Extensions to the standard Python datetime module"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "six>=1.5",
 ]
@@ -902,6 +932,7 @@ version = "1.6"
 requires_python = ">=3.8"
 summary = "Astropy affiliated package for accessing Virtual Observatory data and services"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "astropy>=4.1",
     "requests",
@@ -917,7 +948,7 @@ version = "0.2.3"
 requires_python = ">=3.6"
 summary = "A (partial) reimplementation of pywin32 using ctypes/cffi"
 groups = ["default"]
-marker = "sys_platform == \"win32\""
+marker = "python_version >= \"3.10\" and python_version < \"3.13\" and sys_platform == \"win32\""
 files = [
     {file = "pywin32-ctypes-0.2.3.tar.gz", hash = "sha256:d162dc04946d704503b2edc4d55f3dba5c1d539ead017afa00142c38b9885755"},
     {file = "pywin32_ctypes-0.2.3-py3-none-any.whl", hash = "sha256:8a1513379d709975552d202d942d9837758905c8d01eb82b8bcc30918929e7b8"},
@@ -929,6 +960,7 @@ version = "6.0.2"
 requires_python = ">=3.8"
 summary = "YAML parser and emitter for Python"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "PyYAML-6.0.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:0a9a2848a5b7feac301353437eb7d5957887edbf81d56e903999a75a3d743086"},
     {file = "PyYAML-6.0.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:29717114e51c84ddfba879543fb232a6ed60086602313ca38cce623c1d62cfbf"},
@@ -966,6 +998,7 @@ version = "2.32.3"
 requires_python = ">=3.8"
 summary = "Python HTTP for Humans."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "certifi>=2017.4.17",
     "charset-normalizer<4,>=2",
@@ -983,6 +1016,7 @@ version = "1.15.2"
 requires_python = ">=3.10"
 summary = "Fundamental algorithms for scientific computing in Python"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy<2.5,>=1.23.5",
 ]
@@ -1023,7 +1057,7 @@ version = "3.3.3"
 requires_python = ">=3.6"
 summary = "Python bindings to FreeDesktop.org Secret Service API"
 groups = ["default"]
-marker = "sys_platform == \"linux\""
+marker = "python_version >= \"3.10\" and python_version < \"3.13\" and sys_platform == \"linux\""
 dependencies = [
     "cryptography>=2.0",
     "jeepney>=0.6",
@@ -1039,6 +1073,7 @@ version = "1.4.1"
 requires_python = ">=3.9"
 summary = "Astronomical source extraction and photometry library"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "numpy>=1.26.4",
 ]
@@ -1075,6 +1110,7 @@ name = "sgp4"
 version = "2.24"
 summary = "Track Earth satellites given TLE data, using up-to-date 2020 SGP4 routines."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "sgp4-2.24-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:11c84e29891908d480dc008e9e5743720eed29ee00d6546a5851284b06d646af"},
     {file = "sgp4-2.24-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:af76b4803deedc023768a344eccf264ed34288d244223293dd79e4506475df61"},
@@ -1103,6 +1139,7 @@ version = "1.16.0"
 requires_python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
 summary = "Python 2 and 3 compatibility utilities"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "six-1.16.0-py2.py3-none-any.whl", hash = "sha256:8abb2f1d86890a2dfb989f9a77cfcfd3e47c2a354b01111771326f8aa26e0254"},
     {file = "six-1.16.0.tar.gz", hash = "sha256:1e61c37477a1626458e36f7b1d82aa5c9b094fa4802892072e49de9c60c4c926"},
@@ -1110,18 +1147,19 @@ files = [
 
 [[package]]
 name = "skyfield"
-version = "1.50"
+version = "1.52"
 summary = "Elegant astronomy for Python"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 dependencies = [
     "certifi>=2017.4.17",
     "jplephem>=2.13",
     "numpy",
-    "sgp4>=2.2",
+    "sgp4>=2.13",
 ]
 files = [
-    {file = "skyfield-1.50-py3-none-any.whl", hash = "sha256:73c7d89568525f743652b6e202418d8cd8fc99eb9b5134ba9b543abf4202f80d"},
-    {file = "skyfield-1.50.tar.gz", hash = "sha256:3dd287fbed42ddcf32bdbf7d12b90cbeaf5f44fcefce700cd49514f5776c66ba"},
+    {file = "skyfield-1.52-py3-none-any.whl", hash = "sha256:4203e9d9ffd2b0b8c118522b606c7c0f14509668379e8e88e3641a4d60d3edb4"},
+    {file = "skyfield-1.52.tar.gz", hash = "sha256:3d0d335a81b8db36d4a658636f211fe51122cda43908ec2573a956ec93e91dec"},
 ]
 
 [[package]]
@@ -1130,6 +1168,7 @@ version = "2.6"
 requires_python = ">=3.8"
 summary = "A modern CSS selector implementation for Beautiful Soup."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "soupsieve-2.6-py3-none-any.whl", hash = "sha256:e72c4ff06e4fb6e4b5a9f0f55fe6e81514581fca1515028625d0f299c602ccc9"},
     {file = "soupsieve-2.6.tar.gz", hash = "sha256:e2e68417777af359ec65daac1057404a3c8a5455bb8abc36f1a9866ab1a51abb"},
@@ -1140,6 +1179,7 @@ name = "tbb"
 version = "2021.10.0"
 summary = "Intel® oneAPI Threading Building Blocks (oneTBB)"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "tbb-2021.10.0-py2.py3-none-macosx_10_15_x86_64.macosx_11_0_x86_64.whl", hash = "sha256:5049f3be64664897f33ac1474a1bb1cfa45274cd8f4541e91fee4eda5c4165b5"},
     {file = "tbb-2021.10.0-py2.py3-none-manylinux1_i686.whl", hash = "sha256:46205d559a2bfd877e9ea9a674fb3efb5d6024bd5dc10ace78c16d9d2db5d921"},
@@ -1154,6 +1194,7 @@ version = "2.2.3"
 requires_python = ">=3.8"
 summary = "HTTP library with thread-safe connection pooling, file post, and more."
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "urllib3-2.2.3-py3-none-any.whl", hash = "sha256:ca899ca043dcb1bafa3e262d73aa25c465bfb49e0bd9dd5d59f1d0acba2f8fac"},
     {file = "urllib3-2.2.3.tar.gz", hash = "sha256:e7d814a81dad81e6caf2ec9fdedb284ecc9c73076b62654547cc64ccdcae26e9"},
@@ -1164,6 +1205,7 @@ name = "webencodings"
 version = "0.5.1"
 summary = "Character encoding aliases for legacy web content"
 groups = ["default"]
+marker = "python_version >= \"3.10\" and python_version < \"3.13\""
 files = [
     {file = "webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78"},
     {file = "webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923"},
@@ -1175,7 +1217,7 @@ version = "3.21.0"
 requires_python = ">=3.9"
 summary = "Backport of pathlib-compatible object wrapper for zip files"
 groups = ["default"]
-marker = "python_version < \"3.12\""
+marker = "python_version >= \"3.10\" and python_version < \"3.12\""
 files = [
     {file = "zipp-3.21.0-py3-none-any.whl", hash = "sha256:ac1bbe05fd2991f160ebce24ffbac5f6d11d83dc90891255885223d42b3cd931"},
     {file = "zipp-3.21.0.tar.gz", hash = "sha256:2c9958f6430a2040341a52eb608ed6dd93ef4392e02ffe219417c1b28b5dd1f4"},
