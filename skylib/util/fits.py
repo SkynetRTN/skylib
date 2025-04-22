@@ -17,18 +17,23 @@ __all__ = [
 ]
 
 
-def str_to_datetime(s):
+def str_to_datetime(s: str) -> datetime | None:
     """
     Parse ISO datetime string and return a datetime object
 
-    :param str s: date/time string
+    :param s: date/time string
 
     :return: datetime object, None if not a valid date/time string
-    :rtype: datetime.datetime | None
     """
     t = None
-    for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S',
-                '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+    for fmt in (
+            '%Y-%m-%dT%H:%M:%S.%f',
+            '%Y-%m-%dT%H:%M:%S',
+            '%Y-%m-%d %H:%M:%S.%f',
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d',
+            '%d/%m/%y',  # occurs in some old radio FITS files from SkyView
+    ):
         try:
             t = datetime.strptime(s, fmt)
         except ValueError:
