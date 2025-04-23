@@ -189,13 +189,15 @@ if windows
     include_dirs += [extra, extra + 'regex', extra + 'endian']
 endif
 
-an_engine = py.extension_module(
-    '_an_engine',
-    sources: an_engine_sources,
-    dependencies: [py_dep],
-    limited_api: '3.10',
-    link_with: libs,
-    include_directories: include_directories(include_dirs),
-    install: true,
-    subdir: 'skylib/astrometry',
-)
+if not windows
+    an_engine = py.extension_module(
+        '_an_engine',
+        sources: an_engine_sources,
+        dependencies: [py_dep],
+        limited_api: '3.10',
+        link_with: libs,
+        include_directories: include_directories(include_dirs),
+        install: true,
+        subdir: 'skylib/astrometry',
+    )
+endif
