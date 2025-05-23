@@ -8,7 +8,7 @@ import numpy as np
 from numba import njit
 from scipy.optimize import fsolve, least_squares
 from astropy.time import Time
-from astropy.coordinates import AltAz, EarthLocation, NonRotationTransformationWarning, SkyCoord, get_body
+from astropy.coordinates import AltAz, EarthLocation, GCRS, NonRotationTransformationWarning, SkyCoord, get_body
 
 from ..util.angle import airmass_for_el
 
@@ -19,34 +19,45 @@ __all__ = [
 ]
 
 
-def moon_brightness(t: Time, site: EarthLocation, target: SkyCoord, sun: SkyCoord | None = None,
-                    m0: float = 18.0, kr: float = 1.06, g: float = 0.8, r_to_a: float = 4.1, tau: float = 0.138) \
-        -> float:
+def moon_brightness(
+        t: Time,
+        site: EarthLocation,
+        target: SkyCoord,
+        sun: SkyCoord | None = None,
+        m0: float = 18.0,
+        kr: float = 1.06,
+        krm: float = 4.1,
+        g: float = 0.8,
+        tau: float = 0.138,
+) -> float:
     """
     Estimate the Moon's contribution to the total sky brightness following Winkler, H. "A revised simplified scattering
     model for the moonlit sky brightness profile based on photometry at SAAO" // 2022, MNRAS, 514(1), 208--226
 
     Default values are for the V band, taken from Winkler (2022).
 
-    :param t: observation time.
-    :param site: observation site.
-    :param target: target coordinates.
+    :param t: Observation time.
+    :param site: Observation site.
+    :param target: Target coordinates.
     :param sun: Sun coordinates. If None, the Sun's coordinates will be calculated.
     :param m0: Moon brightness zero point for the given bandpass in magnitudes per arcsecond squared.
-    :param kr: moonlight Rayleigh scattering coefficient = (1 + 3 chi)/(1 - chi) as per Bucholtz (1995).
-    :param g: moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model ( > 0 and < 1).
-    :param r_to_a: ratio of moonlight Rayleigh to aerosol scattering optical depths ( > 0).
-    :param tau: total optical depth = 0.921 k, where k is the atmospheric extinction coefficient ( > 0).
+    :param kr: Moonlight Rayleigh scattering coefficient = (1 + 3 chi)/(1 - chi) as per Bucholtz (1995).
+    :param krm: Ratio of moonlight Rayleigh to aerosol scattering optical depths (> 0).
+    :param g: Moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model (> 0 and < 1).
+    :param tau: Total moonlight optical depth = 0.921 k, where k is the atmospheric extinction coefficient (> 0).
 
-    :returns: estimated Moon's brightness contribution at the location of the target, in magnitudes per arcsecond
+    :returns: Estimated Moon's brightness contribution at the location of the target, in magnitudes per arcsecond
         squared.
     """
+    # Moon airmass
     moon = get_body("moon", t, site)
     moon_elevation = moon.transform_to(AltAz(obstime=t, location=site)).alt.deg
     if moon_elevation <= 0:
+        # No moonlight contribution
         return np.inf
-    airmass = airmass_for_el(moon_elevation)
+    sec_z = airmass_for_el(moon_elevation)
 
+    # Moon phase angle
     if sun is None:
         sun = get_body("sun", t, site)
     phase_angle = moon.separation(sun).rad
@@ -54,10 +65,22 @@ def moon_brightness(t: Time, site: EarthLocation, target: SkyCoord, sun: SkyCoor
         # Solar eclipse
         return np.inf
 
+    # Target airmass and Moon separation (need to convert to topocentric first)
+    obsgeoloc, obsgeovel = site.get_gcrs_posvel(t)
+    local_target_coord = SkyCoord(target, location=site, obstime=t).transform_to(GCRS(
+        obstime=t, obsgeoloc=obsgeoloc, obsgeovel=obsgeovel, representation_type='spherical'
+    ))
+    sec_zeta = airmass_for_el(local_target_coord.transform_to(AltAz(obstime=t, location=site)).alt.deg)
+    cos_theta = np.cos(local_target_coord.separation(moon).rad)
+
+    att = (1 - g**2)/(1 + g**2 - 2*g*cos_theta)**1.5 + krm*(kr + cos_theta**2)/(kr + 1/3)  # Henyey--Greenstein
+    att *= sec_zeta*np.where(
+        sec_z == sec_zeta,
+        tau*np.exp(-tau*sec_zeta),
+        (np.exp(-tau*sec_zeta) - np.exp(-tau*sec_z))/(sec_z - sec_zeta))
     normalized_flux = (
-            (1 - np.cos(phase_angle))/2  # phase function
-            / airmass  # atmospheric extinction
-            * (1 - g)**3/(1 + g**2 - 2*g*np.cos(target.separation(moon).rad))**1.5  # Henyey--Greenstein attenuation
+        (1 - np.cos(phase_angle))/2  # phase function
+        * att  # attenuation
     )
     if normalized_flux <= 0:
         return np.inf
@@ -129,32 +152,37 @@ def kastner_log_l(a: float, z: float, sun_a: float, h: float) -> float:
 log_l0 = kastner_log_l(180, 18, 0, -18)  # -5.8947
 
 
-def sky_brightness(t: Time, site: EarthLocation, target: SkyCoord,
-                   night_sky_brightness: float = 22,
-                   twilight_coeff: float = 2.5*np.log(10),
-                   moonlight_zero_point: float = 18.0,
-                   moonlight_rayleigh_coeff: float = 1.06,
-                   moonlight_aerosol_coeff: float = 0.8,
-                   moonlight_rayleigh_to_aerosol_ratio: float = 4.1,
-                   moonlight_optical_depth = 0.138) -> float:
+def sky_brightness(
+        t: Time,
+        site: EarthLocation,
+        target: SkyCoord,
+        night_sky_brightness: float = 22,
+        twilight_coeff: float = 2.5*np.log(10),
+        moonlight_zero_point: float = 18.0,
+        moonlight_rayleigh_coeff: float = 1.06,
+        moonlight_aerosol_coeff: float = 0.8,
+        moonlight_rayleigh_to_aerosol_ratio: float = 4.1,
+        moonlight_optical_depth: float = 0.138,
+) -> float:
     """
     Estimate the sky brightness based on the Sun's elevation, Moon's phase, and the mutual position of Sun, Moon, and
     target.
 
-    :param t: observation time.
-    :param site: observation site.
-    :param target: target coordinates.
-    :param night_sky_brightness: night sky brightness for the given bandpass in magnitudes per arcsecond squared.
-    :param twilight_coeff: twilight sky brightness growth factor ( > 0).
+    :param t: Observation time.
+    :param site: Observation site.
+    :param target: Target coordinates.
+    :param night_sky_brightness: Night sky brightness for the given bandpass in magnitudes per arcsecond squared.
+    :param twilight_coeff: Twilight sky brightness growth factor (> 0).
     :param moonlight_zero_point: Moon brightness zero point for the given bandpass in magnitudes per arcsecond squared.
-    :param moonlight_rayleigh_coeff: moonlight Rayleigh scattering coefficient = (1 + 3chi)/(1 - chi) as per Bucholtz
+    :param moonlight_rayleigh_coeff: Moonlight Rayleigh scattering coefficient = (1 + 3chi)/(1 - chi) as per Bucholtz
         (1995)
-    :param moonlight_aerosol_coeff: moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model
-        ( > 0 and < 1).
-    :param moonlight_rayleigh_to_aerosol_ratio: ratio of moonlight Rayleigh to aerosol scattering optical depths ( > 0).
-    :param moonlight_optical_depth: total optical depth = 0.921 k, where k is the atmospheric extinction coefficient.
+    :param moonlight_aerosol_coeff: Moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model
+        (> 0 and < 1).
+    :param moonlight_rayleigh_to_aerosol_ratio: Ratio of moonlight Rayleigh to aerosol scattering optical depths (> 0).
+    :param moonlight_optical_depth: Total moonlight optical depth = 0.921 k, where k is the atmospheric extinction
+        coefficient (> 0).
 
-    :returns: estimated sky brightness in magnitudes per arcsecond squared.
+    :returns: Estimated sky brightness in magnitudes per arcsecond squared.
     """
     # Nighttime and twilight sky contribution
     sun = get_body("sun", t, site)
@@ -170,8 +198,8 @@ def sky_brightness(t: Time, site: EarthLocation, target: SkyCoord,
 
     # Moonlight contribution
     moon_mag = moon_brightness(
-        t, site, target, sun, m0=moonlight_zero_point, kr=moonlight_rayleigh_coeff, g=moonlight_aerosol_coeff,
-        r_to_a=moonlight_rayleigh_to_aerosol_ratio, tau=moonlight_optical_depth)
+        t, site, target, sun, m0=moonlight_zero_point, kr=moonlight_rayleigh_coeff,
+        krm=moonlight_rayleigh_to_aerosol_ratio, g=moonlight_aerosol_coeff, tau=moonlight_optical_depth)
     if np.isfinite(moon_mag):
         # Combine nighttime sky, twilight, and moonlight contributions
         return -2.5*np.log10(10**(-0.4*sky_mag) + 10**(-0.4*moon_mag))
@@ -182,8 +210,8 @@ def sky_brightness(t: Time, site: EarthLocation, target: SkyCoord,
 def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: np.ndarray,
                         night_sky_brightness: float = 22, fix_night_sky_brightness: bool = False,
                         twilight_coeff: float = 0.44, fix_twilight_coeff: bool = False,
-                        full_moon_brightness: float = -12.7, fix_full_moon_brightness: bool = False,
-                        moonlight_attenuation: float = 0.8, fix_moonlight_attenuation: bool = False) \
+                        moonlight_zero_point: float = -12.7, fix_moonlight_zero_point: bool = False,
+                        moonlight_aerosol_coeff: float = 0.8, fix_moonlight_aerosol_coeff: bool = False) \
         -> tuple[float, float, float, float]:
     """
     Calculate the three sky background model parameters given a set of measured sky background magnitudes.
@@ -198,21 +226,20 @@ def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: n
     :param night_sky_brightness: nighttime sky brightness for the given bandpass in magnitudes per arcsecond squared;
         fixed value if `fix_night_sky_brightness` = True or initial guess otherwise
     :param fix_night_sky_brightness: should `night_sky_brightness` be fixed or estimated from the data?
-    :param twilight_coeff: twilight sky brightness growth factor ( > 0); fixed value if `fix_twilight_coeff` = True
+    :param twilight_coeff: twilight sky brightness growth factor (> 0); fixed value if `fix_twilight_coeff` = True
         or initial guess otherwise.
     :param fix_twilight_coeff: should `twilight_coeff` be fixed or estimated from the data?
-    :param full_moon_brightness: full Moon brightness for the given bandpass in magnitudes per arcsecond squared;
-        fixed value if `fix_full_moon_brightness` = True or initial guess otherwise.
-    :param fix_full_moon_brightness: should `full_moon_brightness` be fixed or estimated from the data?
-    :param moonlight_attenuation: fixed moonlight attenuation parameter in the Henyey--Greenstein model ( > 0 and < 1);
-        fixed value if `fix_moonlight_attenuation` = True or initial guess otherwise.
-    :param fix_moonlight_attenuation: should `moonlight_attenuation` be fixed or estimated from the data?
+    :param moonlight_zero_point: Moon brightness zero point for the given bandpass in magnitudes per arcsecond squared.
+    :param fix_moonlight_zero_point: should `moonlight_zero_point` be fixed or estimated from the data?
+    :param moonlight_aerosol_coeff: moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model
+        (> 0 and < 1).
+    :param fix_moonlight_aerosol_coeff: should `moonlight_aerosol_coeff` be fixed or estimated from the data?
 
     :returns: sky background model parameters:
         - `night_sky_brightness`: nighttime sky brightness for the given bandpass in magnitudes per arcsecond squared.
         - `twilight_coeff`: twilight sky brightness growth factor.
-        - `full_moon_brightness`: full Moon brightness for the given bandpass.
-        - `moonlight_attenuation`: moonlight attenuation parameter in the Henyey--Greenstein model.
+        - `moonlight_zero_point`: Moon brightness zero point for the given bandpass.
+        - `moonlight_attenuation`: moonlight aerosol scattering asymmetry parameter in the Henyey--Greenstein model.
     """
     def func(x):
         # Parse parameters that can vary
@@ -227,13 +254,13 @@ def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: n
         else:
             tc = x[i]
             i += 1
-        if fix_full_moon_brightness:
-            fmb = full_moon_brightness
+        if fix_moonlight_zero_point:
+            mzp = moonlight_zero_point
         else:
-            fmb = x[i]
+            mzp = x[i]
             i += 1
-        if fix_moonlight_attenuation:
-            ma = moonlight_attenuation
+        if fix_moonlight_aerosol_coeff:
+            ma = moonlight_aerosol_coeff
         else:
             ma = x[i]
             i += 1
@@ -241,8 +268,8 @@ def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: n
         res = mags.copy()
         for i, (ti, ci) in enumerate(zip(t, targets)):
             res[i] -= sky_brightness(
-                ti, site, ci, night_sky_brightness=nsb, twilight_coeff=tc, full_moon_brightness=fmb,
-                moonlight_attenuation=ma,
+                ti, site, ci, night_sky_brightness=nsb, twilight_coeff=tc, moonlight_zero_point=mzp,
+                moonlight_aerosol_coeff=ma,
             )
         return res
 
@@ -257,12 +284,12 @@ def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: n
         x0.append(twilight_coeff)
         bounds_lo.append(0)
         bounds_hi.append(1.5)
-    if not fix_full_moon_brightness:
-        x0.append(full_moon_brightness)
+    if not fix_moonlight_zero_point:
+        x0.append(moonlight_zero_point)
         bounds_lo.append(-13)
         bounds_hi.append(-10)
-    if not fix_moonlight_attenuation:
-        x0.append(moonlight_attenuation)
+    if not fix_moonlight_aerosol_coeff:
+        x0.append(moonlight_aerosol_coeff)
         bounds_lo.append(0)
         bounds_hi.append(1)
 
@@ -275,13 +302,13 @@ def calibrate_sky_model(t: Time, site: EarthLocation, targets: SkyCoord, mags: n
         if not fix_twilight_coeff:
             twilight_coeff = params[p]
             p += 1
-        if not fix_full_moon_brightness:
-            full_moon_brightness = params[p]
+        if not fix_moonlight_zero_point:
+            moonlight_zero_point = params[p]
             p += 1
-        if not fix_moonlight_attenuation:
-            moonlight_attenuation = params[p]
+        if not fix_moonlight_aerosol_coeff:
+            moonlight_aerosol_coeff = params[p]
 
-    return night_sky_brightness, twilight_coeff, full_moon_brightness, moonlight_attenuation
+    return night_sky_brightness, twilight_coeff, moonlight_zero_point, moonlight_aerosol_coeff
 
 
 def exptime_for_mag_and_snr(
