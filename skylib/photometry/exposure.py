@@ -2,6 +2,7 @@
 Exposure time calculator based on the sky brightness and the desired signal-to-noise ratio.
 """
 
+from datetime import datetime
 import warnings
 
 import numpy as np
@@ -16,6 +17,7 @@ from ..util.angle import airmass_for_el
 __all__ = [
     "moon_brightness", "sky_brightness", "calibrate_sky_model",
     "exptime_for_mag_and_snr", "mag_for_exptime_and_snr", "snr_for_mag_and_exptime", "flux15_for_exptime_mag_and_snr",
+    "planck_law", "planck_law_normalized", "dust_extinction",
 ]
 
 
@@ -153,7 +155,7 @@ log_l0 = kastner_log_l(180, 18, 0, -18)  # -5.8947
 
 
 def sky_brightness(
-        t: Time,
+        t: Time | datetime | str,
         site: EarthLocation,
         target: SkyCoord,
         night_sky_brightness: float = 22,
@@ -185,6 +187,10 @@ def sky_brightness(
     :returns: Estimated sky brightness in magnitudes per arcsecond squared.
     """
     # Nighttime and twilight sky contribution
+    if isinstance(t, (datetime, str)):
+        t = Time(t)
+    elif not isinstance(t, Time):
+        raise TypeError("t must be a Time object or a datetime or a string")
     sun = get_body("sun", t, site)
     sun_altaz = sun.transform_to(AltAz(obstime=t, location=site))
     sun_h = sun_altaz.alt.deg
@@ -498,3 +504,79 @@ def flux15_for_exptime_mag_and_snr(
         lambda x:
             mag - mag_for_exptime_and_snr(point_source, texp, snr, read_noise, sky, dark, x, pixsize, seeing, aper),
         flux15)[0])
+
+
+# Planck's law; used by the brightness model with blackbody spectral component
+planck_law_h = 6.62607015e-34  # Planck's constant (SI)
+planck_law_c = 2.99792458e8  # Speed of light  (SI)
+planck_law_k = 1.380649e-23  # Boltzmann constant (SI)
+planck_law_b = 2.897771955e-3  # Wien's displacement constant (SI)
+
+
+def planck_law(wavelength: float, temperature: float) -> float:
+    """
+    Calculate the spectral radiance of a black body at a given wavelength and temperature using Planck's law.
+
+    :param wavelength: Wavelength in meters.
+    :param temperature: Temperature in Kelvin.
+
+    :return: Spectral radiance in W/(m^2 * sr * m).
+    """
+    return (2*planck_law_h*planck_law_c**2)/(wavelength**5) \
+        / (np.exp(planck_law_h*planck_law_c/(wavelength*planck_law_k*temperature)) - 1)
+
+
+def planck_law_normalized(wavelength: float, temperature: float) -> float:
+    """
+    Calculate the normalized spectral radiance of a black body at a given wavelength and temperature using Planck's law.
+
+    :param wavelength: Wavelength in meters.
+    :param temperature: Temperature in Kelvin.
+
+    :return: Normalized spectral radiance.
+    """
+    return planck_law(wavelength, temperature)/planck_law(planck_law_b/temperature, temperature)
+
+
+def dust_extinction(filter_wavelength: float, av: float = 0, rv: float = 3.1) -> float:
+    """Calculate extinction strength.
+
+    See: https://ui.adsabs.harvard.edu/abs/1989ApJ...345..245C/abstract
+
+    :param filter_wavelength: Center wavelength in nanometers.
+    :param av: Absolute V-band extinction.
+    :param rv: Ratio of total to selective extinction, typically 3.1 for the Milky Way.
+
+    :return: Extinction in magnitudes.
+    """
+    if av <= 0:
+        return 0.0
+
+    x = 1000/filter_wavelength
+    y = x - 1.82
+
+    if 0.3 <= x < 1.1:
+        # IR
+        a = 0.574*x**1.61
+        b = -0.527*x**1.61
+    elif 1.1 <= x < 3.3:
+        # Optical/NIR
+        a = 1 + 0.17699*y - 0.50447*y**2 - 0.02427*y**3 + 0.72085*y**4 + 0.01979*y**5 - 0.7753*y**6 + 0.32999*y**7
+        b = 1.41338*y + 2.28305*y**2 + 1.07233*y**3 - 5.38434*y**4 - 0.62251*y**5 + 5.3026*y**6 - 2.09002*y**7
+    elif 3.3 <= x < 8:
+        # Near UV
+        if x >= 5.9:
+            fa = -0.04473*(x - 5.9)**2 - 0.009779*(x - 5.9)**3
+            fb = 0.2130*(x - 5.9)**2 + 0.1207*(x - 5.9)**3
+        else:
+            fa = fb = 0
+        a = 1.752 - 0.316*x - 0.104/((x - 4.67)**2 + 0.341) + fa
+        b = -3.090 + 1.825*x + 1.206/((x - 4.62)**2 + 0.263) + fb
+    elif 8 <= x <= 10:
+        # Far UV
+        a = -1.073 - 0.628*(x - 8) + 0.137*(x - 8)**2 - 0.070*(x - 8)**3
+        b = 13.670 + 4.257*(x - 8) - 0.420*(x - 8)**2 + 0.374*(x - 8)**3
+    else:
+        a = b = 0
+
+    return av*(a + b/rv)
