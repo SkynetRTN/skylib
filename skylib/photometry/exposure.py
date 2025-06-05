@@ -16,8 +16,8 @@ from ..util.angle import airmass_for_el
 
 __all__ = [
     "moon_brightness", "sky_brightness", "calibrate_sky_model",
-    "exptime_for_mag_and_snr", "mag_for_exptime_and_snr", "snr_for_mag_and_exptime", "flux15_for_exptime_mag_and_snr",
-    "planck_law", "planck_law_normalized", "dust_extinction",
+    "exptime_for_mag_and_snr", "exptime_for_mag_and_counts", "mag_for_exptime_and_snr", "snr_for_mag_and_exptime",
+    "flux15_for_exptime_mag_and_snr", "planck_law", "planck_law_normalized", "dust_extinction",
 ]
 
 
@@ -361,6 +361,47 @@ def exptime_for_mag_and_snr(
     b = -total_counts*snr**2
     c = -(read_noise*snr)**2
     return (-b + np.sqrt(b**2 - 4*a*c))/(2*a)
+
+
+def exptime_for_mag_and_counts(
+        point_source: bool,
+        mag: float,
+        target_counts: float,
+        sky: float,
+        dark: float,
+        flux15: float,
+        pixsize: float,
+        seeing: float = 2,
+        aper: float | None = None,
+) -> float:
+    """
+    Calculate the exposure time for a given star magnitude and desired electron count.
+
+    :param point_source: whether the object is a point or extended source.
+    :param mag: object brightness in mag for point sources; surface brightness in mag/arcsec^2 for extended sources.
+    :param target_counts: desired electrons per pixel (not including blank level).
+    :param sky: sky brightness in magnitudes per arcsec^2.
+    :param dark: dark current in electrons per pixel per second.
+    :param flux15: flux for a 15th magnitude object in electrons per second: flux15 = 10**(-0.4*(15 - zp)).
+    :param pixsize: pixel size in arcsec.
+    :param seeing: seeing in arcsec. Unused for extended sources.
+    :param aper: photometric aperture diameter in arcsec; 2*`seeing` if omitted. Unused for extended sources.
+
+    :return: exposure time in seconds.
+    """
+    background = dark + flux15*pixsize**2*10**(-0.4*(sky - 15))  # total background flux per pixel per second
+
+    if point_source:
+        if aper is None:
+            aper = 2*seeing
+        rad = aper/2/pixsize
+        counts = flux15*10**(-0.4*(mag - 15))*(1 - np.exp(-0.5*(rad/seeing*2.35*pixsize)**2))
+        total_counts = counts + background*np.pi*rad**2
+    else:
+        counts = flux15*pixsize**2*10**(-0.4*(mag - 15))
+        total_counts = counts + background
+
+    return target_counts/total_counts
 
 
 def mag_for_exptime_and_snr(
