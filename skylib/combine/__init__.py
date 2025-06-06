@@ -1,4 +1,3 @@
 """
-SkyLib functions for combining images, including averaging/summation and
-alignment.
+SkyLib functions for image registration, including alignment, stacking, cropping, mosaicing, and dithering.
 """
