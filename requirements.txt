@@ -40,7 +40,7 @@ python-dateutil==2.9.0.post0
 pyvo==1.6.1
 pywin32-ctypes==0.2.3; sys_platform == "win32"
 pyyaml==6.0.2
-requests==2.32.3
+requests==2.32.4
 scipy==1.15.2
 secretstorage==3.3.3; sys_platform == "linux"
 sep==1.4.1
