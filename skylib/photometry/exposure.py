@@ -83,7 +83,7 @@ def sky_brightness(
         twilight_sun_elevation: float = -9.54,
         twilight_coeff: float = -0.057,
         scatter_asymmetry: float = 0.8,
-        backscatter_damping: float = 0.001,
+        backscatter_damping: float = 0.05,
         rayleigh_to_aerosol_weight: float = 0.5,
         multiple_scattering_exponent: float = 1.3,
         extinction_coeff: float = 0.15,
