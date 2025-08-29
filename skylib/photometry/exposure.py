@@ -121,7 +121,13 @@ def sky_brightness(
     sun_h = max(sun_altaz.alt.deg, -18)
 
     # Dependence on target azimuth and elevation
-    target_altaz = target.transform_to(AltAz(obstime=t, location=site))
+    if target.frame.name == 'altaz':
+        if target.frame.location is None:
+            target_altaz = SkyCoord(target, obstime=t, location=site)
+        else:
+            target_altaz = target
+    else:
+        target_altaz = target.transform_to(AltAz(obstime=t, location=site))
     airmass = airmass_for_el(target_altaz.alt.deg)/airmass_for_el(90)
 
     # Nighttime and twilight sky at zenith
