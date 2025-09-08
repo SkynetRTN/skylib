@@ -1,10 +1,11 @@
-"""
-SkyLib astrometric reduction package
+"""SkyLib astrometric reduction package
 
-Built around the local Astrometry.net engine binding. Users must create an
-Astrometry.net solver using :func:`create_solver`, which loads indexes, and
-then use :func:`solve_field` to obtain an :class:`astropy.wcs.WCS` instance
-given a list of XY positions of field stars.
+This module primarily interfaces with the local Astrometry.net engine binding
+but can fall back to the `ASTAP <https://www.hnsky.org/astap.htm>`_ solver if
+the binding is unavailable or if the user explicitly selects it via
+``solve_field(..., backend="astap")``.  The ASTAP executable and its star
+catalog must be installed separately; the code only points ASTAP to an existing
+catalog.
 """
 
 from __future__ import absolute_import, division, print_function
@@ -19,7 +20,10 @@ from astropy.wcs import Sip, WCS
 
 from skylib.util.angle import angdist
 
-from . import an_engine
+try:  # pragma: no cover - optional dependency
+    from . import an_engine
+except Exception:  # pragma: no cover - missing optional dependency
+    an_engine = None
 
 
 __all__ = ['Solver', 'solve_field', 'solve_field_glob']
@@ -47,6 +51,9 @@ class Solver(object):
         :param str | list index_path: directory or list of directories
             containing index files
         """
+        if an_engine is None:
+            raise ImportError('an_engine module not available')
+
         if isinstance(index_path, str):
             index_path = [index_path]
 
@@ -117,14 +124,17 @@ def array_from_swig(data, shape, dtype=numpy.float64):
     return a
 
 
-def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
-                dec_degs=0, radius=180, min_scale=0.1, max_scale=10,
-                parity=None, sip_order=3, crpix_center=True, max_sources=None,
-                retry_lost=True, callback=None) -> Solution:
+def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
+                ra_hours=0, dec_degs=0, radius=180, min_scale=0.1,
+                max_scale=10, pixel_scale=None, parity=None, sip_order=3,
+                crpix_center=True, max_sources=None, retry_lost=True,
+                callback=None, backend=None, astap_cmd='astap',
+                astap_catalog=None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 
-    :param :class:`Solver` engine: Astrometry.net engine solver instance
+    :param :class:`Solver` engine: Astrometry.net engine solver instance;
+        optional when using the ASTAP backend
     :param array_like xy: (n x 2) array of 1-based X and Y pixel coordinates
         of stars
     :param array_like flux: optional n-element array of star fluxes
@@ -140,6 +150,8 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
         pixel; default: 0.1
     :param float max_scale: optional maximum pixel scale in arcseconds per
         pixel; default: 10
+    :param float pixel_scale: pixel scale in arcseconds per pixel for the ASTAP
+        backend; ignored for the Astrometry.net backend
     :param bool | None parity: image parity (sign of coordinate transformation
         matrix determinant): True = normal parity, False = flipped image, None
         (default) = try both
@@ -155,10 +167,35 @@ def solve_field(engine, xy, flux=None, width=None, height=None, ra_hours=0,
     :param callable callback: optional callable that is regularly called
         by the solver, accepts no arguments, and returns 0 to interrupt
         the solution and 1 otherwise
+    :param str backend: ``"an"`` for Astrometry.net (default if available) or
+        ``"astap"`` to use the ASTAP solver
+    :param str astap_cmd: path to ASTAP executable when using the ASTAP backend
+    :param str astap_catalog: path to the ASTAP star catalog directory
 
     :return: astrometric solution object; its `wcs` attribute is set to None if
         solution was not found
     """
+
+    if xy is None:
+        raise ValueError('xy must be provided')
+
+    if backend is None:
+        backend = 'an' if an_engine is not None else 'astap'
+
+    if backend == 'astap':
+        from . import astap_solver
+        xy_arr = numpy.asanyarray(xy)
+        if width is None:
+            width = int(numpy.max(xy_arr[:, 0]) - numpy.min(xy_arr[:, 0])) + 1
+        if height is None:
+            height = int(numpy.max(xy_arr[:, 1]) - numpy.min(xy_arr[:, 1])) + 1
+        return astap_solver.solve_astap(
+            xy_arr, width=width, height=height, ra_hours=ra_hours,
+            dec_degs=dec_degs, pixel_scale=pixel_scale, cmd=astap_cmd,
+            catalog=astap_catalog)
+
+    if engine is None:
+        raise ValueError('engine must be provided for Astrometry.net backend')
     solver = engine.solver
     ra = float(ra_hours)*15
     dec = float(dec_degs)
@@ -392,9 +429,24 @@ def solve_field_glob(engine, xy, flux=None, width=None, height=None,
     :return: astrometric solution object; its `wcs` attribute is set to None if
         solution was not found
     """
-    sol = solve_field(engine, xy, flux, width, height, ra_hours, dec_degs,
-                      radius, min_scale, max_scale, parity, sip_order,
-                      crpix_center, max_sources, retry_lost, callback)
+    sol = solve_field(
+        engine,
+        xy,
+        flux=flux,
+        width=width,
+        height=height,
+        ra_hours=ra_hours,
+        dec_degs=dec_degs,
+        radius=radius,
+        min_scale=min_scale,
+        max_scale=max_scale,
+        parity=parity,
+        sip_order=sip_order,
+        crpix_center=crpix_center,
+        max_sources=max_sources,
+        retry_lost=retry_lost,
+        callback=callback,
+    )
     if sol.wcs is not None and len(xy) >= min_sources:
         n = len(xy)
         xy = numpy.asarray(xy)
