@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import Iterable, Optional
 
 import numpy as np
@@ -25,7 +26,7 @@ __all__ = ["solve_astap"]
 
 
 def solve_astap(
-    image_path: str,
+    image_path: Path,
     ra_hours: float = 0.0,
     dec_degs: float = 0.0,
     pixel_scale: Optional[float] = None,
@@ -60,7 +61,7 @@ def solve_astap(
     with tempfile.TemporaryDirectory() as tmp:
         output = os.path.join(tmp, "solved")
 
-        cmdline = [cmd, "-f", image_path, "-o", output,
+        cmdline = [cmd, "-f", str(image_path), "-o", output,
                    "-ra", str(float(ra_hours)),
                    "-spd", str(float(dec_degs+90.))]
         if radius is not None:

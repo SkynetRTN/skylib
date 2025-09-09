@@ -14,6 +14,7 @@ import os
 import sys
 from glob import glob
 import ctypes
+from pathlib import Path
 
 import numpy
 from astropy.wcs import Sip, WCS
@@ -129,7 +130,7 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
                 max_scale=10, pixel_scale=None, parity=None, sip_order=3,
                 crpix_center=True, max_sources=None, retry_lost=True,
                 callback=None, backend=None, astap_cmd='astap_cli',
-                astap_catalog= "C:/astap", image_path=None) -> Solution:
+                astap_catalog= "C:/astap", image_path: Path=None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 
