@@ -110,12 +110,12 @@ class Solution(object):
         n_field: total number of sources
         index_name: index file name that solved the image
     """
-    wcs = None  # type: WCS
-    log_odds = None
-    n_match = None
-    n_conflict = None
-    n_field = None
-    index_name = None
+    wcs: WCS | None = None  # type: WCS
+    log_odds: float | None = None
+    n_match: int | None = None
+    n_conflict: int | None = None
+    n_field: int | None = None
+    index_name: str | None = None
 
 
 def array_from_swig(data, shape, dtype=numpy.float64):
