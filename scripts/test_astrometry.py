@@ -17,8 +17,6 @@ hdul = fits.open(image_path)
 hdu = hdul[0]
 
 # Get the image data as a NumPy ndarray
-astap_cmd = "C:/Users/haislip/astap/astap_cli.exe"
-astap_catalog = "C:/Users/haislip/astap"
 image_data = hdu.data
 ra = hdu.header['CRVAL1']
 dec = hdu.header['CRVAL2']
@@ -44,7 +42,7 @@ else:
             except KeyError:
                 flux = None
 
-        args = dict(flux=flux, width=width, height=height, ra_hours=ra/15.0, dec_degs=dec, radius=1, pixel_scale=pixel_scale, astap_cmd=astap_cmd, astap_catalog=astap_catalog, image_path=image_path)
+        args = dict(flux=flux, width=width, height=height, ra_hours=ra/15.0, dec_degs=dec, radius=1, pixel_scale=pixel_scale, image_path=image_path)
         logging.info(
             'Solving field; %s',
             ', '.join('{}={}'.format(name, repr(val))

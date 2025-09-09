@@ -128,8 +128,8 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
                 ra_hours=0, dec_degs=0, radius=180, min_scale=0.1,
                 max_scale=10, pixel_scale=None, parity=None, sip_order=3,
                 crpix_center=True, max_sources=None, retry_lost=True,
-                callback=None, backend=None, astap_cmd='astap',
-                astap_catalog=None, image_path=None) -> Solution:
+                callback=None, backend=None, astap_cmd='astap_cli',
+                astap_catalog= "C:/astap", image_path=None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 

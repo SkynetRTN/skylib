@@ -31,7 +31,7 @@ def solve_astap(
     pixel_scale: Optional[float] = None,
     radius: float = 1.0,
     cmd: str = "astap_cli",
-    catalog: Optional[str] = None,
+    catalog: Optional[str] = "C:/astap",
 ) -> Solution:
     """Solve field using ASTAP.
 
