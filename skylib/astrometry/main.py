@@ -129,7 +129,7 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
                 max_scale=10, pixel_scale=None, parity=None, sip_order=3,
                 crpix_center=True, max_sources=None, retry_lost=True,
                 callback=None, backend=None, astap_cmd='astap',
-                astap_catalog=None) -> Solution:
+                astap_catalog=None, image_path=None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 
@@ -184,14 +184,12 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
 
     if backend == 'astap':
         from . import astap_solver
-        xy_arr = numpy.asanyarray(xy)
-        if width is None:
-            width = int(numpy.max(xy_arr[:, 0]) - numpy.min(xy_arr[:, 0])) + 1
-        if height is None:
-            height = int(numpy.max(xy_arr[:, 1]) - numpy.min(xy_arr[:, 1])) + 1
-        return astap_solver.solve_astap(
-            xy_arr, width=width, height=height, ra_hours=ra_hours,
-            dec_degs=dec_degs, pixel_scale=pixel_scale, cmd=astap_cmd,
+        if image_path is None:
+            raise ValueError('image_path must be provided for ASTAP backend')
+        
+     
+        return astap_solver.solve_astap(image_path=image_path, ra_hours=ra_hours,
+            dec_degs=dec_degs, radius=radius, pixel_scale=pixel_scale, cmd=astap_cmd,
             catalog=astap_catalog)
 
     if engine is None:

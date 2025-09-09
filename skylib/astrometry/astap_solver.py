@@ -23,35 +23,22 @@ from .main import Solution
 __all__ = ["solve_astap"]
 
 
-def _write_fits(xy: np.ndarray, width: int, height: int, path: str) -> None:
-    """Write a simple FITS image with point sources at the given coordinates."""
-    data = np.zeros((int(height), int(width)), dtype=np.float32)
-    for x, y in xy:
-        xi = int(round(x)) - 1
-        yi = int(round(y)) - 1
-        if 0 <= xi < width and 0 <= yi < height:
-            data[yi, xi] = 1.0
-    fits.writeto(path, data, overwrite=True)
-
 
 def solve_astap(
-    xy: Iterable[Iterable[float]],
-    width: int,
-    height: int,
+    image_path: str,
     ra_hours: float = 0.0,
     dec_degs: float = 0.0,
     pixel_scale: Optional[float] = None,
-    cmd: str = "astap",
+    radius: float = 1.0,
+    cmd: str = "astap_cli",
     catalog: Optional[str] = None,
 ) -> Solution:
     """Solve field using ASTAP.
 
     Parameters
     ----------
-    xy : iterable of ``(x, y)``
-        Source positions in 1-based pixel coordinates.
-    width, height : int
-        Image dimensions in pixels.
+    image_path : str
+        Path to the FITS image file containing the field to be solved.
     ra_hours, dec_degs : float, optional
         Approximate centre of the field.  ``ra_hours`` is specified in hours
         while ``dec_degs`` is in degrees.
@@ -69,28 +56,30 @@ def solve_astap(
         Astrometric solution object.  If solving fails the ``wcs`` attribute is
         ``None``.
     """
-    xy_arr = np.asarray(list(xy))
-
+    
     with tempfile.TemporaryDirectory() as tmp:
-        input_fits = os.path.join(tmp, "field.fits")
-        output_fits = os.path.join(tmp, "solved.fits")
-        _write_fits(xy_arr, width, height, input_fits)
+        output = os.path.join(tmp, "solved")
 
-        cmdline = [cmd, "-f", input_fits, "-o", output_fits,
-                   "-r", str(float(ra_hours) * 15.0),
-                   "-d", str(float(dec_degs))]
-        if pixel_scale is not None:
-            cmdline.extend(["-p", str(float(pixel_scale))])
+        cmdline = [cmd, "-f", image_path, "-o", output,
+                   "-ra", str(float(ra_hours)),
+                   "-spd", str(float(dec_degs+90.))]
+        if radius is not None:
+            cmdline.extend(["-r", str(float(radius))])
+        # if pixel_scale is not None:
+        #     cmdline.extend(["-p", str(float(pixel_scale))])
         if catalog:
-            cmdline.extend(["-c", catalog])
+            cmdline.extend(["-d", catalog])
 
+        print("Running: ", " ".join(cmdline))
         subprocess.run(cmdline, check=False)
 
         sol = Solution()
-        if os.path.exists(output_fits):
+        output = output + ".wcs"
+        if os.path.exists(output):
             try:
-                with fits.open(output_fits) as hdul:
-                    sol.wcs = WCS(hdul[0].header)
-            except Exception:
+                hdr = fits.Header.fromtextfile(output)
+                sol.wcs = WCS(hdr)
+            except Exception as e:
+                print("Failed to read WCS:", e)
                 sol.wcs = None
         return sol
