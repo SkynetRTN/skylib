@@ -15,6 +15,7 @@ import sys
 from glob import glob
 import ctypes
 from pathlib import Path
+from typing import Optional
 
 import numpy
 from astropy.wcs import Sip, WCS
@@ -127,10 +128,10 @@ def array_from_swig(data, shape, dtype=numpy.float64):
 
 def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
                 ra_hours=0, dec_degs=0, radius=180, min_scale=0.1,
-                max_scale=10, pixel_scale=None, parity=None, sip_order=3,
+                max_scale=10, fov=None, parity=None, sip_order=3,
                 crpix_center=True, max_sources=None, retry_lost=True,
                 callback=None, backend=None, astap_cmd='astap_cli',
-                astap_catalog= "C:/astap", image_path: Path=None) -> Solution:
+                astap_catalog= "C:/astap", image_path: Path=None, downsample: Optional[int] = None) -> Solution:
     """
     Obtain astrometric solution given XY coordinates of field stars
 
@@ -151,8 +152,8 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
         pixel; default: 0.1
     :param float max_scale: optional maximum pixel scale in arcseconds per
         pixel; default: 10
-    :param float pixel_scale: pixel scale in arcseconds per pixel for the ASTAP
-        backend; ignored for the Astrometry.net backend
+    :param float fov: field of view in degrees for the ASTAP backend;
+        ignored for the Astrometry.net backend
     :param bool | None parity: image parity (sign of coordinate transformation
         matrix determinant): True = normal parity, False = flipped image, None
         (default) = try both
@@ -190,8 +191,8 @@ def solve_field(engine=None, xy=None, flux=None, width=None, height=None,
         
      
         return astap_solver.solve_astap(image_path=image_path, ra_hours=ra_hours,
-            dec_degs=dec_degs, radius=radius, pixel_scale=pixel_scale, cmd=astap_cmd,
-            catalog=astap_catalog)
+            dec_degs=dec_degs, radius=radius, fov=fov, cmd=astap_cmd,
+            catalog=astap_catalog, downsample=downsample)
 
     if engine is None:
         raise ValueError('engine must be provided for Astrometry.net backend')
