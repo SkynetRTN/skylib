@@ -88,6 +88,7 @@ def sky_brightness(
         multiple_scattering_exponent: float = 1.3,
         extinction_coeff: float = 0.15,
         moonlight_zero_point: float = 18.0,
+        max_airmass: float = 7.0,
 ) -> float:
     """
     Estimate the sky brightness based on the Sun's elevation, Moon's phase, and the mutual position of Sun, Moon, and
@@ -128,7 +129,7 @@ def sky_brightness(
             target_altaz = target
     else:
         target_altaz = target.transform_to(AltAz(obstime=t, location=site))
-    airmass = airmass_for_el(target_altaz.alt.deg)/airmass_for_el(90)
+    airmass = min(airmass_for_el(target_altaz.alt.deg) if target_altaz.alt.deg > 0 else max_airmass, max_airmass)/airmass_for_el(90)
 
     # Nighttime and twilight sky at zenith
     dz = twilight_sun_elevation - sun_h
