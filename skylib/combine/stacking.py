@@ -66,17 +66,8 @@ def _calc_scaling(scaling: str,
                 data = data.compressed()
             else:
                 data = data.ravel()
-
-            # NEW: handle empty/invalid data safely
-            if data.size == 0:
-                avg = 1.0   # neutral scale
-            else:
-                min_val = data.min(initial=0)
-                hist = np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))
-                if hist.size == 0:
-                    avg = 1.0
-                else:
-                    avg = np.argmax(hist) + min_val
+            min_val = data.min(initial=0)
+            avg = np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))) + min_val
 
         elif scaling == 'histogram':
             # Approximate histogram peak and tail matching: subtract mode, then divide by median
@@ -84,24 +75,9 @@ def _calc_scaling(scaling: str,
                 data = data.compressed()
             else:
                 data = data.ravel()
-
-            # NEW: handle empty/invalid data safely
-            if data.size == 0:
-                ofs = 0.0
-                avg = 1.0
-            else:
-                min_val = data.min(initial=0)
-                hist = np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))
-                if hist.size == 0:
-                    ofs = 0.0
-                    # use nanmean in case data has NaNs that weren't masked
-                    m = np.nanmean(data) if data.size else 0.0
-                    avg = 1.0 if not np.isfinite(m) else m
-                else:
-                    ofs = -np.argmax(hist) - min_val
-                    # use nanmean to be robust to NaNs
-                    m = np.nanmean(data)
-                    avg = (m + ofs) if np.isfinite(m) else 1.0
+            min_val = data.min(initial=0)
+            ofs = -np.argmax(np.bincount((data - min_val).clip(0, 2*0x10000 - 1).astype(np.int32))) - min_val
+            avg = data.mean() + ofs
 
         else:
             raise ValueError(f'Unknown scaling mode "{scaling}"')
