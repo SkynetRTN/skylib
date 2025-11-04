@@ -202,87 +202,95 @@ def chauvenet1py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
     n_tot = data.shape[0]
     n_iter = 0
     while True:
-        # Number of non-rejected values
+        # number of non-rejected values
         n = n_tot
-        for i in prange(n_tot):
+        for i in range(n_tot):
             if mask[i]:
                 n -= 1
         goodmask = ~mask
 
+        # mean
         if mean_override is None:
             if mean_type == 0:
-                if n:
-                    mu = data[goodmask].mean()
-                else:
-                    mu = 0
+                mu = float(np.mean(data[goodmask])) if n else 0.0
             else:
-                if n:
-                    mu = np.median(data[goodmask])
-                else:
-                    mu = 0
+                mu = float(np.median(data[goodmask])) if n else 0.0
         else:
-            mu = mean_override
+            mu = float(mean_override)
 
+        # deviations
         dev = data - mu
+
+        # sigma
         if sigma_override is None:
             if sigma_type == 0:
-                gamma = stddev1(dev, mask)
+                # stddev1 should be your existing, non-parallel @njit helper
+                gamma = float(stddev1(dev, mask))
             else:
-                if goodmask.any():
-                    gamma = quantile(np.abs(dev[goodmask]), q)
+                if np.any(goodmask):
+                    gamma = float(quantile(np.abs(dev[goodmask]), q))
                 else:
-                    gamma = 0
+                    gamma = 0.0
                 if gamma <= 0:
-                    gamma = stddev1(dev, mask)
+                    gamma = float(stddev1(dev, mask))
         else:
-            gamma = sigma_override
+            gamma = float(sigma_override)
 
-        if max_iter and n_iter >= max_iter or not clip_lo and not clip_hi or \
-                check_idx is not None and mask[check_idx]:
+        # stopping checks
+        if (max_iter and n_iter >= max_iter) or (not clip_lo and not clip_hi) or \
+           (check_idx is not None and mask[check_idx]):
             break
         if n <= min_vals or np.isinf(gamma):
             break
 
+        # tails
         if clip_lo and clip_hi:
             t = np.abs(dev)
         elif clip_lo:
-            # noinspection PyTypeChecker
             t = np.clip(-dev, 0, None)
         else:
-            # noinspection PyTypeChecker
             t = np.clip(dev, 0, None)
 
-        t /= gamma
+        # CDF (gamma can be zero if all equal)
+        if gamma != 0.0:
+            t = t / gamma
         if nu:
-            cdf = ng_cdf(t, nu)
-        else:  # Gaussian
-            t /= np.sqrt(2)
-            cdf = np.empty(data.shape, float)
-            for i in prange(n_tot):
-                cdf[i] = 0.5*(1 + math.erf(t[i]))
-        bad = (goodmask & (n > min_vals) & (cdf > 1 - 0.25/n)).astype(np.int32)
-        n_bad = bad.sum(0)
-        if not n_bad or n - n_bad < min_vals:
-            # Either no more values to reject or fewer values than allowed
-            # would remain after rejection
-            break
+            cdf = ng_cdf(t, nu)  # your existing helper (non-parallel)
+        else:
+            # Gaussian
+            cdf = np.empty_like(t, dtype=np.float64)
+            rt2 = np.sqrt(2.0)
+            for i in range(n_tot):
+                ti = (t[i] / rt2) if gamma != 0.0 else 0.0
+                cdf[i] = 0.5 * (1.0 + math.erf(ti))
 
-        # Can reject more values
-        for i in prange(n_tot):
+        # rejection
+        bad = goodmask.astype(np.int32)
+        if n <= min_vals:
+            bad[:] = 0
+        else:
+            thr = 1.0 - 0.25 / n
+            for i in range(n_tot):
+                if (not goodmask[i]) or (cdf[i] <= thr):
+                    bad[i] = 0
+
+        # apply / stop
+        n_bad = 0
+        for i in range(n_tot):
             if bad[i]:
                 mask[i] = True
+                n_bad += 1
+
+        if n_bad == 0 or n - n_bad < min_vals:
+            break
 
         n_iter += 1
 
-    if not np.isfinite(gamma):
-        gamma = 0
-
     return mask, mu, gamma
 
-
-chauvenet1_parallel = njit(nogil=True, parallel=True, cache=True)(chauvenet1py)
+# Compile WITHOUT parallel=True to avoid parfors entirely
+from numba import njit
 chauvenet1 = njit(nogil=True, cache=True)(chauvenet1py)
-
 
 def chauvenet2py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                  mean_type: int,
@@ -397,15 +405,17 @@ def chauvenet2py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
             for i in prange(n_tot):
                 for j in range(data.shape[1]):
                     cdf[i, j] = 0.5*(1 + math.erf(t[i, j]))
-        bad = (goodmask & (n > min_vals) & (cdf > 1 - 0.25/n)).astype(np.int32)
+        bad = goodmask.astype(np.int32)
         for j in prange(data.shape[1]):
             nj = n[j]
             if nj <= min_vals:
+                # Not enough samples: reject nothing in this column.
                 for i in range(n_tot):
                     bad[i, j] = 0
                 continue
+            thr = 1.0 - 0.25 / nj
             for i in range(n_tot):
-                if cdf[i, j] <= 1 - 0.25/nj:
+                if cdf[i, j] <= thr:
                     bad[i, j] = 0
         n_bad = bad.sum(0)
         if ((n_bad == 0) | (n - n_bad < min_vals)).all():
@@ -548,14 +558,26 @@ def chauvenet3py(data: np.ndarray, mask: np.ndarray, nu: int, min_vals: int,
                 for i in range(n_tot):
                     t[i, j, k] /= gammajk
         if nu:
-            cdf = ng_cdf(t, nu)
+            # Avoid passing a 3-D array to ng_cdf; do it per (j,k) 1-D slice.
+            cdf = np.empty(data.shape, np.float64)
+            for j in prange(data.shape[1]):
+                for k in range(data.shape[2]):
+                    # t[:, j, k] is 1-D (length n_tot)
+                    c = ng_cdf(t[:, j, k], nu)  # returns 1-D
+                    # write back without any broadcasting
+                    for i in range(n_tot):
+                        cdf[i, j, k] = c[i]
         else:  # Gaussian
-            t /= np.sqrt(2)
+            for j in prange(data.shape[1]):
+                for k in range(data.shape[2]):
+                    for i in range(n_tot):
+                        t[i, j, k] /= np.sqrt(2.0)
             cdf = np.empty(data.shape, float)
             for i in prange(n_tot):
                 for j in range(data.shape[1]):
                     for k in range(data.shape[2]):
-                        cdf[i, j, k] = 0.5*(1 + math.erf(t[i, j, k]))
+                        cdf[i, j, k] = 0.5 * (1.0 + math.erf(t[i, j, k]))
+
         bad = goodmask.astype(np.int32)
         for j in prange(data.shape[1]):
             for k in range(data.shape[2]):
@@ -665,15 +687,26 @@ def chauvenet(data: np.ndarray, mask: Optional[np.ndarray] = None,
         q = 0.626
     else:
         q = 0.683
-    # Decrease the probability that Nq is a whole number
     q += 1e-7
 
-    return (chauvenet1_parallel, chauvenet2_parallel,
-            chauvenet3_parallel)[ndim - 1](
-        np.ascontiguousarray(data).astype(np.float64), mask, nu, min_vals,
-        mean_type, mean_override, sigma_type, sigma_override, clip_lo, clip_hi,
-        max_iter, check_idx, q)
+    data64 = np.ascontiguousarray(data).astype(np.float64)
 
+    if ndim == 1:
+        # ALWAYS use non-parallel 1-D to avoid parfors broadcast asserts
+        return chauvenet1(
+            data64, mask, nu, min_vals, mean_type, mean_override,
+            sigma_type, sigma_override, clip_lo, clip_hi, max_iter,
+            check_idx, q)
+    elif ndim == 2:
+        return chauvenet2_parallel(
+            data64, mask, nu, min_vals, mean_type, mean_override,
+            sigma_type, sigma_override, clip_lo, clip_hi, max_iter,
+            check_idx, q)
+    else:  # ndim == 3
+        return chauvenet3_parallel(
+            data64, mask, nu, min_vals, mean_type, mean_override,
+            sigma_type, sigma_override, clip_lo, clip_hi, max_iter,
+            check_idx, q)
 
 def weighted_quantile(data: Union[np.ndarray, Iterable],
                       weights: Union[np.ndarray, Iterable],
