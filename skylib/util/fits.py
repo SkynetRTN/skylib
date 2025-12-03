@@ -58,13 +58,20 @@ def get_fits_time(hdr: Header, exp_length: Optional[float] = None) \
     t_start = t_cen = t_stop = None
 
     try:
-        date = hdr['DATE-OBS']
-        time = hdr.get('TIME-OBS', "")
-        if 'T' not in date:
-            date = f"{date}T{time}" if time else date
-        t_start = str_to_datetime(date)
-    except Exception:
-        t_start = None
+        date_obs = hdr['DATE-OBS']
+    except (KeyError, ValueError):
+        date_obs = None
+    else:
+        # Normalize to string for parsing
+        if date_obs is not None:
+            date_obs = str(date_obs)
+        time_obs = hdr.get('TIME-OBS')
+
+        # Only append TIME-OBS if present and non-empty
+        if date_obs is not None and 'T' not in date_obs and isinstance(time_obs, str) and time_obs:
+            date_obs = date_obs + 'T' + time_obs
+
+    t_start = str_to_datetime(date_obs) if date_obs is not None else None
 
     try:
         t_cen = str_to_datetime(hdr['DATE-CEN'])
