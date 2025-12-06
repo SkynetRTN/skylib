@@ -50,6 +50,6 @@ skyfield==1.53
 soupsieve==2.6
 tbb==2021.10.0
 typing-extensions==4.13.1
-urllib3==2.3.0
+urllib3==2.6.0
 webencodings==0.5.1
 zipp==3.21.0; python_version < "3.12"
