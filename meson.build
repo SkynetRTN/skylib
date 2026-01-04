@@ -32,8 +32,9 @@ if windows
     add_project_arguments(['-include', extra + 'an-defs.h', '-D_POSIX', '-D_POSIX_C_SOURCE'], language: 'c')
 endif
 
-foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color', 'skylib/combine', 'skylib/enhancement',
-            'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry', 'skylib/sonification', 'skylib/util']
+foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry2', 'skylib/calibration', 'skylib/color', 'skylib/combine',
+            'skylib/enhancement', 'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry',
+            'skylib/sonification', 'skylib/util']
     sources = run_command(
         py, ['-c', 'from glob import glob; print("\\n".join(glob("' + p + '/*.py")), end="")'], check: true
     ).stdout().split('\n')
@@ -41,6 +42,7 @@ foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color',
 endforeach
 
 py.install_sources(['skylib/astrometry/ngc2000.dat'], subdir: 'skylib/astrometry')
+py.install_sources(['skylib/astrometry2/ngc2000.dat'], subdir: 'skylib/astrometry2')
 py.install_sources(['skylib/sonification/start.wav', 'skylib/sonification/stop.wav'], subdir: 'skylib/sonification')
 py.install_sources(['scripts/fits2wav.py'], subdir: 'skylib/scripts')
 
