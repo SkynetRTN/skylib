@@ -85,9 +85,15 @@ class AstapConfig:
 
 @dataclass
 class PlateSolveConfig:
-    cmd: str = "platesolve3"
-    args: Sequence[str] = ("{image_path}",)
-    output_suffix: str = ".wcs"
+    cmd: str = "platesolve3.80"
+    args: Sequence[str] = (
+        "{image_path}",
+        "{ra_rad}",
+        "{dec_rad}",
+        "{x_size_rad}",
+        "{y_size_rad}",
+    )
+    output_suffix: str = ".txt"
     output_path: Optional[Path] = None
     cwd: Optional[Path] = None
 
@@ -410,6 +416,20 @@ class PlateSolveBackend:
         if output_path is None:
             output_path = request.image_path.with_suffix(config.output_suffix)
 
+        ra_rad = np.deg2rad(float(request.ra_hours) * 15.0)
+        dec_rad = np.deg2rad(float(request.dec_degs))
+        if request.fov is not None:
+            x_size = float(request.fov)
+        elif request.radius is not None:
+            x_size = float(request.radius) * 2.0
+        else:
+            x_size = 0.0
+        y_size = x_size
+        if request.width and request.height and x_size:
+            y_size = x_size * (float(request.height) / float(request.width))
+        x_size_rad = np.deg2rad(x_size)
+        y_size_rad = np.deg2rad(y_size)
+
         context = {
             "cmd": config.cmd,
             "image_path": request.image_path,
@@ -421,6 +441,10 @@ class PlateSolveBackend:
             "height": request.height,
             "output_path": output_path,
             "downsample": request.downsample,
+            "ra_rad": ra_rad,
+            "dec_rad": dec_rad,
+            "x_size_rad": x_size_rad,
+            "y_size_rad": y_size_rad,
         }
         cmdline = [config.cmd]
         for arg in config.args:
@@ -431,7 +455,10 @@ class PlateSolveBackend:
         subprocess.run(cmdline, check=False, cwd=str(config.cwd) if config.cwd else None)
 
         sol = SolveSolution(backend=self.name)
-        sol.wcs = _load_wcs(output_path)
+        if output_path.suffix.lower() == ".txt":
+            sol.wcs, sol.metadata = _load_platesolve_solution(output_path)
+        else:
+            sol.wcs = _load_wcs(output_path)
         return sol
 
 
@@ -562,6 +589,86 @@ def _load_wcs(path: Path) -> Optional[WCS]:
             return WCS(header)
         except Exception:
             return None
+
+
+def _load_platesolve_solution(path: Path) -> tuple[Optional[WCS], dict]:
+    if not path.exists():
+        return None, {}
+
+    lines = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    if not lines:
+        return None, {}
+
+    metadata: dict = {}
+    success_tokens = lines[0].lower().replace(",", " ").split()
+    success = any(token == "true" for token in success_tokens)
+    metadata["success"] = success
+    if not success:
+        return None, metadata
+
+    def parse_floats(line: str) -> list[float]:
+        cleaned = line.replace(",", " ")
+        values = []
+        for token in cleaned.split():
+            try:
+                values.append(float(token))
+            except ValueError:
+                continue
+        return values
+
+    ra_dec = parse_floats(lines[1]) if len(lines) > 1 else []
+    if len(ra_dec) >= 2:
+        ra_rad, dec_rad = ra_dec[0], ra_dec[1]
+    else:
+        return None, metadata
+    metadata["ra_rad"] = ra_rad
+    metadata["dec_rad"] = dec_rad
+
+    scale_rot = parse_floats(lines[2]) if len(lines) > 2 else []
+    if len(scale_rot) >= 2:
+        imscale, rot_deg = scale_rot[0], scale_rot[1]
+        metadata["imscale"] = imscale
+        metadata["rotation_deg"] = rot_deg
+    else:
+        return None, metadata
+
+    if len(lines) > 3:
+        metadata["match_method"] = lines[3]
+
+    if len(lines) > 4:
+        coeffs = parse_floats(lines[4])
+        if len(coeffs) >= 8:
+            metadata["transform_coeffs"] = coeffs[:8]
+
+    if len(lines) > 5:
+        u0v0 = parse_floats(lines[5])
+        if len(u0v0) >= 2:
+            u0, v0 = u0v0[0], u0v0[1]
+        else:
+            u0, v0 = 0.0, 0.0
+    else:
+        u0, v0 = 0.0, 0.0
+    metadata["u0"] = u0
+    metadata["v0"] = v0
+
+    if len(lines) > 6:
+        extra = parse_floats(lines[6])
+        if extra:
+            metadata["extra"] = extra
+
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ("RA---TAN", "DEC--TAN")
+    wcs.wcs.crval = [np.rad2deg(ra_rad), np.rad2deg(dec_rad)]
+    wcs.wcs.crpix = [u0, v0]
+    scale_deg = (1.0 / imscale) * (180.0 / np.pi)
+    theta = np.deg2rad(rot_deg)
+    wcs.wcs.cd = scale_deg * np.array(
+        [
+            [-np.cos(theta), np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+    )
+    return wcs, metadata
 
 
 def array_from_swig(data, shape, dtype=np.float64):
