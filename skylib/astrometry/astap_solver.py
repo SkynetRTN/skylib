@@ -13,9 +13,8 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
-import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
