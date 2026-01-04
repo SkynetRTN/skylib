@@ -18,7 +18,7 @@ from astropy.wcs import Sip, WCS
 from skylib.util.angle import angdist
 
 try:  # pragma: no cover - optional dependency
-    from skylib.astrometry import an_engine
+    from . import an_engine
 except Exception:  # pragma: no cover - missing optional dependency
     an_engine = None
 
