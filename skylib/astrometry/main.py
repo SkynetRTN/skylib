@@ -21,7 +21,7 @@ from skylib.astrometry2 import (
 )
 
 try:  # pragma: no cover - optional dependency
-    from . import an_engine
+    from skylib.astrometry2 import an_engine
 except Exception:  # pragma: no cover - missing optional dependency
     an_engine = None
 

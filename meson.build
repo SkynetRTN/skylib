@@ -200,6 +200,6 @@ if not windows
         link_with: libs,
         include_directories: include_directories(include_dirs),
         install: true,
-        subdir: 'skylib/astrometry',
+        subdir: 'skylib/astrometry2',
     )
 endif
