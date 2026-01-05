@@ -1,4 +1,4 @@
-"""Assisted plate solver using UCAC4 catalog zones."""
+"""Assisted plate solver using UCAC catalog zones."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 
-from skylib.astrometry.atlas.catalog.ucac4 import Ucac4Index
+from skylib.astrometry.atlas.catalog import CatalogIndex, get_catalog_spec
 from skylib.astrometry.atlas.extract.sources import ExtractedSources, extract_sources
 from skylib.astrometry.atlas.match.triangles import TriangleSet, build_kdtree, sample_triangles
 from skylib.astrometry.atlas.wcs.build import wcs_from_similarity
@@ -32,8 +32,10 @@ class SolveResult:
 
 def solve(
     fits_path: Path,
-    ucac4_root: Path,
+    ucac4_root: Optional[Path] = None,
     *,
+    catalog: str = "ucac4",
+    ucac5_root: Optional[Path] = None,
     ra0_deg: float,
     dec0_deg: float,
     scale_range_arcsec_per_pix: Tuple[float, float],
@@ -76,8 +78,9 @@ def solve(
     ra_half = (ra_width / cos_dec) / 2.0
     dec_half = dec_height / 2.0
 
-    ucac4 = Ucac4Index(ucac4_root)
-    cat = ucac4.query_box(
+    catalog_name, catalog_root = _resolve_catalog(catalog, ucac4_root, ucac5_root)
+    catalog_index = _catalog_index(catalog_name, catalog_root)
+    cat = catalog_index.query_box(
         ra0_deg - ra_half,
         ra0_deg + ra_half,
         dec0_deg - dec_half,
@@ -159,6 +162,7 @@ def solve(
         "rotation_deg": float(np.rad2deg(np.arctan2(rotation[1, 0], rotation[0, 0]))),
         "rms_arcsec": float(rms * (180.0 / np.pi) * 3600.0),
         "inliers": int(inliers),
+        "catalog": catalog_name,
         "match_method": "triangles",
         "elapsed_s": float(elapsed),
     }
@@ -329,3 +333,25 @@ def _refine_center(
     matched_cat = cat_xy[idx[mask]]
     scale, rotation, translation = _fit_similarity(matched_obs, matched_cat)
     return wcs_from_similarity(scale, rotation, translation, ra0_deg, dec0_deg)
+
+
+def _resolve_catalog(
+    catalog: str,
+    ucac4_root: Optional[Path],
+    ucac5_root: Optional[Path],
+) -> Tuple[str, Path]:
+    catalog_name = catalog.strip().lower()
+    if catalog_name == "ucac4":
+        if ucac4_root is None:
+            raise ValueError("ucac4_root must be provided for UCAC4 catalog")
+        return catalog_name, ucac4_root
+    if catalog_name == "ucac5":
+        if ucac5_root is None:
+            raise ValueError("ucac5_root must be provided for UCAC5 catalog")
+        return catalog_name, ucac5_root
+    raise ValueError(f"Unsupported catalog: {catalog}")
+
+
+def _catalog_index(catalog: str, root: Path) -> CatalogIndex:
+    spec = get_catalog_spec(catalog)
+    return spec.index_factory(root)
