@@ -32,7 +32,7 @@ if windows
     add_project_arguments(['-include', extra + 'an-defs.h', '-D_POSIX', '-D_POSIX_C_SOURCE'], language: 'c')
 endif
 
-foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry2', 'skylib/calibration', 'skylib/color', 'skylib/combine',
+foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color', 'skylib/combine',
             'skylib/enhancement', 'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry',
             'skylib/sonification', 'skylib/util']
     sources = run_command(
@@ -42,7 +42,6 @@ foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry2', 'skylib/calibra
 endforeach
 
 py.install_sources(['skylib/astrometry/ngc2000.dat'], subdir: 'skylib/astrometry')
-py.install_sources(['skylib/astrometry2/ngc2000.dat'], subdir: 'skylib/astrometry2')
 py.install_sources(['skylib/sonification/start.wav', 'skylib/sonification/stop.wav'], subdir: 'skylib/sonification')
 py.install_sources(['scripts/fits2wav.py'], subdir: 'skylib/scripts')
 
@@ -200,6 +199,6 @@ if not windows
         link_with: libs,
         include_directories: include_directories(include_dirs),
         install: true,
-        subdir: 'skylib/astrometry2',
+        subdir: 'skylib/astrometry',
     )
 endif
