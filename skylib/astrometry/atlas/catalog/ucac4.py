@@ -47,6 +47,15 @@ class Ucac4Index:
         if not path.exists():
             return None
 
+        file_size = path.stat().st_size
+        if file_size % _RECORD_SIZE != 0:
+            raise ValueError(
+                "UCAC4 zone file size is not a multiple of the record size "
+                f"({_RECORD_SIZE} bytes): {path} ({file_size} bytes). "
+                "This typically indicates the wrong catalog directory or a "
+                "corrupted zone file."
+            )
+
         mm = np.memmap(path, dtype=_UCAC4_DTYPE, mode="r")
         if mm.size == 0:
             return None
