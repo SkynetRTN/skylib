@@ -470,7 +470,7 @@ class PlateSolveBackend:
             sol.wcs, sol.metadata = _load_platesolve_solution(output_path)
         else:
             sol.wcs = _load_wcs(output_path)
-    return sol
+        return sol
 
 
 def _inject_platesolve_wcs(
