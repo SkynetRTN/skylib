@@ -32,7 +32,9 @@ if windows
     add_project_arguments(['-include', extra + 'an-defs.h', '-D_POSIX', '-D_POSIX_C_SOURCE'], language: 'c')
 endif
 
-foreach p: ['skylib', 'skylib/astrometry', 'skylib/calibration', 'skylib/color', 'skylib/combine',
+foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry/atlas', 'skylib/astrometry/atlas/catalog',
+            'skylib/astrometry/atlas/extract', 'skylib/astrometry/atlas/match', 'skylib/astrometry/atlas/solve',
+            'skylib/astrometry/atlas/wcs', 'skylib/calibration', 'skylib/color', 'skylib/combine',
             'skylib/enhancement', 'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry',
             'skylib/sonification', 'skylib/util']
     sources = run_command(
