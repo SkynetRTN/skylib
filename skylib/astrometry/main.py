@@ -18,9 +18,10 @@ from astropy.wcs import Sip, WCS
 
 from skylib.util.angle import angdist
 
-an_engine = None
-if importlib.util.find_spec(f"{__package__}.an_engine"):
-    an_engine = importlib.import_module(f"{__package__}.an_engine")
+try:  # pragma: no cover - optional dependency
+    from . import an_engine
+except Exception:  # pragma: no cover - missing optional dependency
+    an_engine = None
 
 BackendConfig = Union[
     "AstrometryNetConfig",
