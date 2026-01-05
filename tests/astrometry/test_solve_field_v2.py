@@ -38,11 +38,11 @@ def _get_samples(backend: str) -> list[dict[str, object]]:
     return samples
 
 
-def _sample_image_path(backend: str, sample: dict[str, object]) -> Path:
+def _sample_image_path(sample: dict[str, object]) -> Path:
     image = sample.get("image")
     if not image:
-        raise ValueError(f"Sample for {backend} is missing the 'image' field")
-    path = DATA_ROOT / backend / str(image)
+        raise ValueError(f"Sample is missing the 'image' field")
+    path = DATA_ROOT / str(image)
     if not path.exists():
         pytest.skip(f"Sample image missing: {path}")
     return path
@@ -82,11 +82,11 @@ def _extract_xy(image_path: Path, max_sources: int | None) -> tuple[np.ndarray, 
 
 
 def test_solve_field_v2_astap_samples() -> None:
-    cmd = os.getenv("SKLIB_ASTAP_CMD", "astap_cli")
+    cmd = os.getenv("SKYLIB_ASTAP_CMD", "astap_cli")
     if shutil.which(cmd) is None:
         pytest.skip(f"ASTAP executable not found: {cmd}")
 
-    catalog = os.getenv("SKLIB_ASTAP_CATALOG")
+    catalog = os.getenv("SKYLIB_ASTAP_CATALOG")
     if not catalog or not Path(catalog).exists():
         pytest.skip("ASTAP catalog path not configured or missing")
 
@@ -94,7 +94,7 @@ def test_solve_field_v2_astap_samples() -> None:
     config = AstapConfig(cmd=cmd, catalog=catalog)
 
     for sample in samples:
-        image_path = _sample_image_path("astap", sample)
+        image_path = _sample_image_path(sample)
         request = _solve_request_from_sample(sample, image_path)
         solution = solve_field_v2(request, backend="astap", configs={"astap": config})
         assert solution.backend == "astap"
@@ -102,19 +102,19 @@ def test_solve_field_v2_astap_samples() -> None:
 
 
 def test_solve_field_v2_platesolve_samples(tmp_path: Path) -> None:
-    cmd = os.getenv("SKLIB_PLATESOLVE_CMD")
+    cmd = os.getenv("SKYLIB_PLATESOLVE_CMD")
     if not cmd:
         pytest.skip("PlateSolve executable not configured")
     if shutil.which(cmd) is None:
         pytest.skip(f"PlateSolve executable not found: {cmd}")
 
-    cwd = os.getenv("SKLIB_PLATESOLVE_CWD")
+    cwd = os.getenv("SKYLIB_PLATESOLVE_CWD")
     config = PlateSolveConfig(cmd=cmd, cwd=Path(cwd) if cwd else None)
 
     samples = _get_samples("platesolve")
 
     for sample in samples:
-        image_path = _sample_image_path("platesolve", sample)
+        image_path = _sample_image_path(sample)
         temp_image = tmp_path / image_path.name
         temp_image.write_bytes(image_path.read_bytes())
 
@@ -129,7 +129,7 @@ def test_solve_field_v2_astrometry_net_samples() -> None:
     if not backend.is_available():
         pytest.skip("Astrometry.net engine is not available")
 
-    index_path = os.getenv("SKLIB_ASTROMETRYNET_INDEX_PATH")
+    index_path = os.getenv("SKYLIB_ASTROMETRYNET_INDEX_PATH")
     if not index_path:
         pytest.skip("Astrometry.net index path not configured")
 
@@ -141,7 +141,7 @@ def test_solve_field_v2_astrometry_net_samples() -> None:
     config = AstrometryNetConfig(index_path=index_paths)
 
     for sample in samples:
-        image_path = _sample_image_path("an", sample)
+        image_path = _sample_image_path(sample)
         request = _solve_request_from_sample(sample, image_path)
         xy, flux, width, height = _extract_xy(image_path, request.max_sources)
         request = SolveRequest(
