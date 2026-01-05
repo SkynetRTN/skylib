@@ -29,6 +29,11 @@ license = {file = "LICENSE"}
 [project.scripts]
 fits2wav = "skylib.scripts.fits2wav:main"
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+]
+
 [build-system]
 requires = [
     "meson-python>=0.17.1",
@@ -42,3 +47,6 @@ distribution = true
 [[tool.pdm.autoexport]]
 filename = "requirements.txt"
 without-hashes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
