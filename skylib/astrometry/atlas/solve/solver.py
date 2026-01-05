@@ -13,6 +13,7 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_scales
 
 from skylib.astrometry.atlas.catalog import CatalogIndex, get_catalog_spec
+from skylib.astrometry.atlas.config import AtlasConfig
 from skylib.astrometry.atlas.extract.sources import ExtractedSources, extract_sources
 from skylib.astrometry.atlas.match.triangles import TriangleSet, build_kdtree, sample_triangles
 from skylib.astrometry.atlas.wcs.build import wcs_from_similarity
@@ -32,28 +33,18 @@ class SolveResult:
 
 def solve(
     fits_path: Path,
-    catalog: str,
-    catalog_root: Path,
+    config: AtlasConfig,
     *,
     ra0_deg: float,
     dec0_deg: float,
     scale_range_arcsec_per_pix: Tuple[float, float],
     fov_guess_deg: Optional[Tuple[float, float]] = None,
-    timeout_s: Optional[float] = None,
-    max_catalog_stars: int = 400,
-    max_image_stars: int = 120,
-    n_tri_obs: int = 8000,
-    n_tri_cat: int = 15000,
-    invariant_tol: float = 0.006,
-    match_tol_arcsec: float = 6.0,
-    refine_center: bool = True,
-    thin: int = 1,
 ) -> SolveResult:
     start = time.perf_counter()
 
     sources = extract_sources(
         fits_path,
-        max_sources=max_image_stars,
+        max_sources=config.max_image_stars,
         crop_fraction=0.8,
         downsample=1,
     )
@@ -77,19 +68,25 @@ def solve(
     ra_half = (ra_width / cos_dec) / 2.0
     dec_half = dec_height / 2.0
 
-    catalog_index = _catalog_index(catalog, catalog_root)
+    catalog_name, catalog_root = config.resolve_catalog()
+    catalog_index = _catalog_index(catalog_name, catalog_root)
     cat = catalog_index.query_box(
         ra0_deg - ra_half,
         ra0_deg + ra_half,
         dec0_deg - dec_half,
         dec0_deg + dec_half,
-        thin=thin,
+        thin=config.thin,
     )
     if cat.ra_deg.size == 0:
         return SolveResult(False, None, {"reason": "empty_catalog"})
 
     cat_xy = _gnomonic_projection(cat.ra_deg, cat.dec_deg, ra0_deg, dec0_deg)
-    cat_xy, cat_radec = _limit_catalog(cat_xy, cat.ra_deg, cat.dec_deg, max_catalog_stars)
+    cat_xy, cat_radec = _limit_catalog(
+        cat_xy,
+        cat.ra_deg,
+        cat.dec_deg,
+        config.max_catalog_stars,
+    )
 
     if len(cat_xy) < 3:
         return SolveResult(False, None, {"reason": "insufficient_catalog"})
@@ -106,14 +103,14 @@ def solve(
 
     obs_tri = sample_triangles(
         obs_xy,
-        n_tri_obs,
+        config.n_tri_obs,
         min_side=min_side_pix,
         max_side=max_side_pix,
         rng=rng,
     )
     cat_tri = sample_triangles(
         cat_xy,
-        n_tri_cat,
+        config.n_tri_cat,
         min_side=min_side_rad,
         max_side=max_side_rad,
         rng=rng,
@@ -124,7 +121,7 @@ def solve(
 
     inv_tree = build_kdtree(cat_tri.invariants)
     cat_tree = cKDTree(cat_xy)
-    tol_rad = np.deg2rad(match_tol_arcsec / 3600.0)
+    tol_rad = np.deg2rad(config.match_tol_arcsec / 3600.0)
 
     best = _match_triangles(
         obs_tri,
@@ -135,9 +132,9 @@ def solve(
         a_min,
         a_max,
         tol_rad,
-        timeout_s=timeout_s,
+        timeout_s=config.timeout_s,
         start=start,
-        invariant_tol=invariant_tol,
+        invariant_tol=config.invariant_tol,
     )
     if best is None:
         return SolveResult(False, None, {"reason": "no_match"})
@@ -145,7 +142,7 @@ def solve(
     scale, rotation, translation, inliers, rms = best
     wcs = wcs_from_similarity(scale, rotation, translation, ra0_deg, dec0_deg)
 
-    if refine_center:
+    if config.refine_center:
         center_x = (width + 1) / 2.0
         center_y = (height + 1) / 2.0
         new_ra, new_dec = wcs.all_pix2world([[center_x, center_y]], 1)[0]
