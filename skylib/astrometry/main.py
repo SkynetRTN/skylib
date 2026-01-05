@@ -104,7 +104,10 @@ class PlateSolveConfig:
 
 @dataclass
 class AtlasConfig:
-    ucac4_root: Path
+    ucac4_root: Optional[Path] = None
+    ucac5_root: Optional[Path] = None
+    catalog: str = "ucac4"
+    catalog_roots: Mapping[str, Path] = field(default_factory=dict)
     timeout_s: Optional[float] = None
     max_catalog_stars: int = 400
     max_image_stars: int = 120
@@ -114,6 +117,20 @@ class AtlasConfig:
     match_tol_arcsec: float = 6.0
     refine_center: bool = True
     thin: int = 1
+
+    def resolve_catalog(self) -> tuple[str, Path]:
+        catalog = self.catalog.strip().lower()
+        if catalog in self.catalog_roots:
+            return catalog, self.catalog_roots[catalog]
+        if catalog == "ucac4":
+            if self.ucac4_root is None:
+                raise ValueError("ucac4_root must be provided for UCAC4 catalog")
+            return catalog, self.ucac4_root
+        if catalog == "ucac5":
+            if self.ucac5_root is None:
+                raise ValueError("ucac5_root must be provided for UCAC5 catalog")
+            return catalog, self.ucac5_root
+        raise ValueError(f"Unsupported catalog: {self.catalog}")
 
 
 class AstrometryNetSolver:
@@ -500,7 +517,9 @@ class AtlasBackend:
         if not isinstance(config, AtlasConfig):
             raise ValueError("Atlas config is required")
         if request.image_path is None:
-            raise ValueError("image_path must be provided for UCAC4 backend")
+            raise ValueError("image_path must be provided for Atlas backend")
+
+        catalog, catalog_root = config.resolve_catalog()
 
 
         fov_guess = None
@@ -509,7 +528,8 @@ class AtlasBackend:
 
         result = atlas_solve(
             request.image_path,
-            config.ucac4_root,
+            catalog_root,
+            catalog=catalog,
             ra0_deg=float(request.ra_hours) * 15.0,
             dec0_deg=float(request.dec_degs),
             scale_range_arcsec_per_pix=(float(request.min_scale), float(request.max_scale)),
@@ -727,6 +747,9 @@ def solve_field(
     image_path: Path = None,
     downsample: Optional[int] = None,
     ucac4_root: Optional[Path] = None,
+    ucac5_root: Optional[Path] = None,
+    atlas_catalog: str = "ucac4",
+    atlas_catalog_roots: Optional[Mapping[str, Path]] = None,
 ) -> SolveSolution:
     """Obtain astrometric solution given XY coordinates of field stars."""
 
@@ -764,9 +787,12 @@ def solve_field(
     elif backend == "astap":
         configs["astap"] = AstapConfig(cmd=astap_cmd, catalog=astap_catalog)
     elif backend == "atlas":
-        if ucac4_root is None:
-            raise ValueError("ucac4_root must be provided for Atlas backend")
-        configs["atlas"] = AtlasConfig(ucac4_root=ucac4_root)
+        configs["atlas"] = AtlasConfig(
+            ucac4_root=ucac4_root,
+            ucac5_root=ucac5_root,
+            catalog=atlas_catalog,
+            catalog_roots=atlas_catalog_roots or {},
+        )
 
     return solve_field_v2(request, backend=backend, configs=configs)
 
