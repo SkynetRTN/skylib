@@ -415,7 +415,8 @@ class PlateSolveBackend:
 
         output_path = config.output_path
         if output_path is None:
-            output_path = request.image_path.with_suffix(config.output_suffix)
+            output_path = request.image_path.with_stem(request.image_path.stem + "_PS3") \
+                                            .with_suffix(config.output_suffix)
 
         ra_rad = np.deg2rad(float(request.ra_hours) * 15.0)
         dec_rad = np.deg2rad(float(request.dec_degs))
