@@ -18,6 +18,7 @@ from astropy.wcs import Sip, WCS
 
 from skylib.util.angle import angdist
 
+from .atlas import AtlasConfig
 from .atlas.solve.solver import solve as atlas_solve
 
 try:  # pragma: no cover - optional dependency
@@ -100,27 +101,6 @@ class PlateSolveConfig:
     output_suffix: str = ".txt"
     output_path: Optional[Path] = None
     cwd: Optional[Path] = None
-
-
-@dataclass
-class AtlasConfig:
-    catalog: str = "ucac5"
-    catalog_roots: Mapping[str, Path] = field(default_factory=dict)
-    timeout_s: Optional[float] = None
-    max_catalog_stars: int = 400
-    max_image_stars: int = 120
-    n_tri_obs: int = 8000
-    n_tri_cat: int = 15000
-    invariant_tol: float = 0.006
-    match_tol_arcsec: float = 6.0
-    refine_center: bool = True
-    thin: int = 1
-
-    def resolve_catalog(self) -> tuple[str, Path]:
-        catalog = self.catalog.strip().lower()
-        if catalog in self.catalog_roots:
-            return catalog, self.catalog_roots[catalog]
-        raise ValueError(f"Unsupported catalog: {self.catalog}")
 
 
 class AstrometryNetSolver:
@@ -509,30 +489,17 @@ class AtlasBackend:
         if request.image_path is None:
             raise ValueError("image_path must be provided for Atlas backend")
 
-        catalog, catalog_root = config.resolve_catalog()
-
-
         fov_guess = None
         if request.fov is not None:
             fov_guess = (float(request.fov), float(request.fov))
 
         result = atlas_solve(
             request.image_path,
-            catalog,
-            catalog_root,
+            config,
             ra0_deg=float(request.ra_hours) * 15.0,
             dec0_deg=float(request.dec_degs),
             scale_range_arcsec_per_pix=(float(request.min_scale), float(request.max_scale)),
             fov_guess_deg=fov_guess,
-            timeout_s=config.timeout_s,
-            max_catalog_stars=config.max_catalog_stars,
-            max_image_stars=config.max_image_stars,
-            n_tri_obs=config.n_tri_obs,
-            n_tri_cat=config.n_tri_cat,
-            invariant_tol=config.invariant_tol,
-            match_tol_arcsec=config.match_tol_arcsec,
-            refine_center=config.refine_center,
-            thin=config.thin,
         )
 
         sol = SolveSolution(backend=self.name)
