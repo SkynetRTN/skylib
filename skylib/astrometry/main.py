@@ -27,6 +27,7 @@ BackendConfig = Union[
     "AstrometryNetConfig",
     "AstapConfig",
     "PlateSolveConfig",
+    "AtlasConfig",
 ]
 
 
@@ -97,6 +98,20 @@ class PlateSolveConfig:
     output_suffix: str = ".txt"
     output_path: Optional[Path] = None
     cwd: Optional[Path] = None
+
+
+@dataclass
+class AtlasConfig:
+    ucac4_root: Path
+    timeout_s: Optional[float] = None
+    max_catalog_stars: int = 400
+    max_image_stars: int = 120
+    n_tri_obs: int = 8000
+    n_tri_cat: int = 15000
+    invariant_tol: float = 0.006
+    match_tol_arcsec: float = 6.0
+    refine_center: bool = True
+    thin: int = 1
 
 
 class AstrometryNetSolver:
@@ -473,6 +488,53 @@ class PlateSolveBackend:
         return sol
 
 
+class AtlasBackend:
+    name = "atlas"
+
+    def is_available(self) -> bool:
+        try:  # pragma: no cover - optional dependency
+            from skylib.astrometry.atlas.solve.solver import solve_assisted  # noqa: F401
+
+            return True
+        except Exception:
+            return False
+
+    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
+        if not isinstance(config, AtlasConfig):
+            raise ValueError("Atlas config is required")
+        if request.image_path is None:
+            raise ValueError("image_path must be provided for UCAC4 backend")
+
+        from skylib.astrometry.atlas.solve.solver import solve_assisted
+
+        fov_guess = None
+        if request.fov is not None:
+            fov_guess = (float(request.fov), float(request.fov))
+
+        result = solve_assisted(
+            request.image_path,
+            config.ucac4_root,
+            ra0_deg=float(request.ra_hours) * 15.0,
+            dec0_deg=float(request.dec_degs),
+            scale_range_arcsec_per_pix=(float(request.min_scale), float(request.max_scale)),
+            fov_guess_deg=fov_guess,
+            timeout_s=config.timeout_s,
+            max_catalog_stars=config.max_catalog_stars,
+            max_image_stars=config.max_image_stars,
+            n_tri_obs=config.n_tri_obs,
+            n_tri_cat=config.n_tri_cat,
+            invariant_tol=config.invariant_tol,
+            match_tol_arcsec=config.match_tol_arcsec,
+            refine_center=config.refine_center,
+            thin=config.thin,
+        )
+
+        sol = SolveSolution(backend=self.name)
+        sol.wcs = result.wcs
+        sol.metadata = result.metadata
+        return sol
+
+
 def _inject_platesolve_wcs(
     image_path: Path,
     tmp_dir: Path,
@@ -536,6 +598,7 @@ def solve_field_v2(
         "astrometry.net": AstrometryNetBackend(),
         "astap": AstapBackend(),
         "platesolve": PlateSolveBackend(),
+        "atlas": AtlasBackend(),
     }
 
     if configs is None:
@@ -667,6 +730,7 @@ def solve_field(
     astap_catalog="C:/astap",
     image_path: Path = None,
     downsample: Optional[int] = None,
+    ucac4_root: Optional[Path] = None,
 ) -> SolveSolution:
     """Obtain astrometric solution given XY coordinates of field stars."""
 
@@ -703,6 +767,10 @@ def solve_field(
         configs["an"] = AstrometryNetConfig(engine=engine)
     elif backend == "astap":
         configs["astap"] = AstapConfig(cmd=astap_cmd, catalog=astap_catalog)
+    elif backend == "atlas":
+        if ucac4_root is None:
+            raise ValueError("ucac4_root must be provided for Atlas backend")
+        configs["atlas"] = AtlasConfig(ucac4_root=ucac4_root)
 
     return solve_field_v2(request, backend=backend, configs=configs)
 
@@ -865,8 +933,10 @@ __all__ = [
     "AstrometryNetConfig",
     "AstrometryNetSolver",
     "Backend",
+    "AtlasBackend",
     "PlateSolveBackend",
     "PlateSolveConfig",
+    "AtlasConfig",
     "SolveRequest",
     "SolveSolution",
     "Solver",

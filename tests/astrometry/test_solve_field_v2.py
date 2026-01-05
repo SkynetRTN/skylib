@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 
 from skylib.astrometry.main import (
+    AtlasConfig,
     AstapConfig,
     AstrometryNetBackend,
     AstrometryNetConfig,
@@ -77,8 +81,30 @@ def _extract_xy(image_path: Path, max_sources: int | None) -> tuple[np.ndarray, 
 
     xy = np.column_stack((sources["x"], sources["y"]))
     flux = sources["flux"]
+    _maybe_save_sources(image_path, data, xy, label="an")
     height, width = data.shape[:2]
     return xy, flux, width, height
+
+
+def _maybe_save_sources(image_path: Path, data: np.ndarray, xy: np.ndarray, *, label: str) -> None:
+    if not os.getenv("SKLIB_DEBUG_SOURCES"):
+        return
+    if importlib.util.find_spec("matplotlib") is None:
+        return
+
+    import matplotlib.pyplot as plt
+
+    output_dir = Path(tempfile.gettempdir())
+    output_path = output_dir / f"skylib_sources_{label}_{image_path.stem}.png"
+
+    norm = ImageNormalize(data, interval=PercentileInterval(99.5), stretch=AsinhStretch())
+    plt.figure(figsize=(8, 8))
+    plt.imshow(data, origin="lower", cmap="gray", norm=norm)
+    plt.scatter(xy[:, 0] - 1, xy[:, 1] - 1, s=20, edgecolor="cyan", facecolor="none")
+    plt.title(f"Extracted sources: {image_path.name}")
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
 
 
 def test_solve_field_v2_astap_samples() -> None:
@@ -164,3 +190,19 @@ def test_solve_field_v2_astrometry_net_samples() -> None:
         solution = solve_field_v2(request, backend="an", configs={"an": config})
         assert solution.backend == "an"
         assert solution.wcs is not None, f"Astrometry.net failed to solve {image_path}"
+
+
+def test_solve_field_v2_atlas_samples() -> None:
+    ucac4_root = os.getenv("SKLIB_UCAC4_ROOT")
+    if not ucac4_root or not Path(ucac4_root).exists():
+        pytest.skip("UCAC4 root path not configured or missing")
+
+    samples = _get_samples("atlas")
+    config = AtlasConfig(ucac4_root=Path(ucac4_root))
+
+    for sample in samples:
+        image_path = _sample_image_path("atlas", sample)
+        request = _solve_request_from_sample(sample, image_path)
+        solution = solve_field_v2(request, backend="atlas", configs={"atlas": config})
+        assert solution.backend == "atlas"
+        assert solution.wcs is not None, f"Atlas failed to solve {image_path}"
