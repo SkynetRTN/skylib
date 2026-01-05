@@ -32,10 +32,9 @@ class SolveResult:
 
 def solve(
     fits_path: Path,
-    ucac4_root: Optional[Path] = None,
+    catalog: str,
+    catalog_root: Path,
     *,
-    catalog: str = "ucac4",
-    ucac5_root: Optional[Path] = None,
     ra0_deg: float,
     dec0_deg: float,
     scale_range_arcsec_per_pix: Tuple[float, float],
@@ -78,8 +77,7 @@ def solve(
     ra_half = (ra_width / cos_dec) / 2.0
     dec_half = dec_height / 2.0
 
-    catalog_name, catalog_root = _resolve_catalog(catalog, ucac4_root, ucac5_root)
-    catalog_index = _catalog_index(catalog_name, catalog_root)
+    catalog_index = _catalog_index(catalog, catalog_root)
     cat = catalog_index.query_box(
         ra0_deg - ra_half,
         ra0_deg + ra_half,
@@ -333,23 +331,6 @@ def _refine_center(
     matched_cat = cat_xy[idx[mask]]
     scale, rotation, translation = _fit_similarity(matched_obs, matched_cat)
     return wcs_from_similarity(scale, rotation, translation, ra0_deg, dec0_deg)
-
-
-def _resolve_catalog(
-    catalog: str,
-    ucac4_root: Optional[Path],
-    ucac5_root: Optional[Path],
-) -> Tuple[str, Path]:
-    catalog_name = catalog.strip().lower()
-    if catalog_name == "ucac4":
-        if ucac4_root is None:
-            raise ValueError("ucac4_root must be provided for UCAC4 catalog")
-        return catalog_name, ucac4_root
-    if catalog_name == "ucac5":
-        if ucac5_root is None:
-            raise ValueError("ucac5_root must be provided for UCAC5 catalog")
-        return catalog_name, ucac5_root
-    raise ValueError(f"Unsupported catalog: {catalog}")
 
 
 def _catalog_index(catalog: str, root: Path) -> CatalogIndex:

@@ -48,10 +48,12 @@ class Ucac4Index:
             return None
 
         file_size = path.stat().st_size
-        if file_size % _RECORD_SIZE != 0:
+        data_size = file_size
+        if data_size <= 0 or data_size % _RECORD_SIZE != 0:
             raise ValueError(
                 "UCAC4 zone file size is not a multiple of the record size "
-                f"({_RECORD_SIZE} bytes): {path} ({file_size} bytes). "
+                f"({_RECORD_SIZE} bytes): "
+                f"{path} ({file_size} bytes). "
                 "This typically indicates the wrong catalog directory or a "
                 "corrupted zone file."
             )

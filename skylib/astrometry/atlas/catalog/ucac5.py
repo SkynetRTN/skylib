@@ -1,131 +1,159 @@
-"""UCAC5 catalog access using local zone files."""
-
 from __future__ import annotations
 
-from collections import OrderedDict
+import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import List, Tuple
 
 import numpy as np
 
-_UCAC5_DTYPE = np.dtype(
-    [
-        ("pad", "u1", 4),
-        ("ra", "<u4"),
-        ("dec", "<i4"),
-        ("rest", "u1", 68),
-    ]
-)
-_RECORD_SIZE = _UCAC5_DTYPE.itemsize
-_MAS_TO_DEG = 1.0 / (1000.0 * 3600.0)
+
+# UCAC5 u5z layout constants
+_UCAC5_ZONES = 900
+_UCAC5_BINS_PER_ZONE = 1440
+
+_UCAC5_ZONE_HEIGHT_DEG = 180.0 / _UCAC5_ZONES        # 0.2 deg
+_UCAC5_BIN_WIDTH_DEG = 360.0 / _UCAC5_BINS_PER_ZONE  # 0.25 deg
 
 
-@dataclass
-class Ucac5QueryResult:
-    ra_deg: np.ndarray
-    dec_deg: np.ndarray
+@dataclass(frozen=True)
+class Ucac5Span:
+    """A contiguous record span in a z### file."""
+    zone: int          # 1..900
+    start: int         # 0-based record start index within zone file
+    count: int         # number of records
 
 
 class Ucac5Index:
-    """Memory-mapped UCAC5 zone reader with RA-sorted queries."""
+    """
+    UCAC5 index reader for the standard u5z zone distribution.
 
-    def __init__(self, root: Path, cache_size: int = 4) -> None:
+    Expected on-disk layout:
+
+      root/
+        u5z/
+          u5index.unf
+          z001
+          ...
+          z900
+    """
+
+    def __init__(self, root: str | Path, *, u5z_subdir: str = "u5z"):
         self.root = Path(root)
-        self.cache_size = max(1, int(cache_size))
-        self._cache: "OrderedDict[int, np.memmap]" = OrderedDict()
+        self.u5z_dir = self.root / u5z_subdir
 
-    def _zone_path(self, zone: int) -> Path:
-        return self.root / f"Z{zone:03d}.UC5"
+        if not self.u5z_dir.exists():
+            raise FileNotFoundError(f"Missing UCAC5 u5z directory: {self.u5z_dir}")
 
-    def _load_zone(self, zone: int) -> np.memmap | None:
-        if zone in self._cache:
-            self._cache.move_to_end(zone)
-            return self._cache[zone]
+        self.index_unf = self.u5z_dir / "u5index.unf"
+        if not self.index_unf.exists():
+            raise FileNotFoundError(f"Missing UCAC5 index file: {self.index_unf}")
 
-        path = self._zone_path(zone)
-        if not path.exists():
-            return None
-
-        file_size = path.stat().st_size
-        if file_size % _RECORD_SIZE != 0:
+        raw = np.fromfile(self.index_unf, dtype="<i4")
+        expected = _UCAC5_ZONES * _UCAC5_BINS_PER_ZONE * 2
+        if raw.size != expected:
             raise ValueError(
-                "UCAC5 zone file size is not a multiple of the record size "
-                f"({_RECORD_SIZE} bytes): {path} ({file_size} bytes). "
-                "This typically indicates the wrong catalog directory or a "
-                "corrupted zone file."
+                f"Unexpected u5index.unf size: got {raw.size} int32 values, "
+                f"expected {expected}. File: {self.index_unf}"
             )
 
-        mm = np.memmap(path, dtype=_UCAC5_DTYPE, mode="r")
-        if mm.size == 0:
-            return None
+        # [zone-1, bin-1, (start,count)]
+        self._idx = raw.reshape((_UCAC5_ZONES, _UCAC5_BINS_PER_ZONE, 2))
 
-        self._cache[zone] = mm
-        if len(self._cache) > self.cache_size:
-            self._cache.popitem(last=False)
-        return mm
+    def zone_path(self, zone: int) -> Path:
+        if not (1 <= zone <= _UCAC5_ZONES):
+            raise ValueError(f"zone out of range: {zone}")
+        return self.u5z_dir / f"z{zone:03d}"
 
-    def query_box(
+    @staticmethod
+    def _wrap_ra_deg(ra_deg: float) -> float:
+        ra = ra_deg % 360.0
+        return ra + 360.0 if ra < 0.0 else ra
+
+    @staticmethod
+    def dec_to_zone(dec_deg: float) -> int:
+        """
+        Map Dec -> UCAC5 zone number 1..900.
+        Zone 1: [-90.0, -89.8), zone 900: [89.8, 90.0)
+        """
+        d = max(-90.0, min(89.999999999, dec_deg))
+        z0 = int(math.floor((d + 90.0) / _UCAC5_ZONE_HEIGHT_DEG))  # 0..899
+        return z0 + 1
+
+    @staticmethod
+    def ra_to_bin(ra_deg: float) -> int:
+        """
+        Map RA -> UCAC5 bin number 1..1440 (0.25 deg per bin).
+        Bin 1: [0.00, 0.25), bin 1440: [359.75, 360.00)
+        """
+        r = Ucac5Index._wrap_ra_deg(ra_deg)
+        r = min(359.999999999, r)
+        b0 = int(math.floor(r / _UCAC5_BIN_WIDTH_DEG))  # 0..1439
+        return b0 + 1
+
+    def get_start_count(self, zone: int, bin_: int) -> Tuple[int, int]:
+        if not (1 <= zone <= _UCAC5_ZONES):
+            raise ValueError(f"zone out of range: {zone}")
+        if not (1 <= bin_ <= _UCAC5_BINS_PER_ZONE):
+            raise ValueError(f"bin out of range: {bin_}")
+        start, count = self._idx[zone - 1, bin_ - 1]
+        return int(start), int(count)
+
+    def spans_for_radec_box(
         self,
         ra_min_deg: float,
         ra_max_deg: float,
         dec_min_deg: float,
         dec_max_deg: float,
-        *,
-        thin: int = 1,
-    ) -> Ucac5QueryResult:
-        """Query catalog stars inside a RA/Dec rectangle in degrees."""
+    ) -> List[Ucac5Span]:
+        """
+        Return (zone,start,count) spans to read for an RA/Dec rectangle.
+        Handles RA wraparound; merges adjacent spans per zone.
+        """
+        dec_lo = max(-90.0, min(dec_min_deg, dec_max_deg))
+        dec_hi = min(90.0,  max(dec_min_deg, dec_max_deg))
+        if dec_lo > dec_hi:
+            return []
 
-        thin = max(1, int(thin))
-        ra_min_deg %= 360.0
-        ra_max_deg %= 360.0
-        dec_min_deg = max(-90.0, dec_min_deg)
-        dec_max_deg = min(90.0, dec_max_deg)
+        z0 = self.dec_to_zone(dec_lo)
+        z1 = self.dec_to_zone(min(89.999999999, dec_hi))
 
-        zones = _zones_for_dec_range(dec_min_deg, dec_max_deg)
-        intervals = _ra_intervals(ra_min_deg, ra_max_deg)
+        # RA wrap handling: split into up to 2 intervals in [0,360)
+        a0 = self._wrap_ra_deg(ra_min_deg)
+        b0 = self._wrap_ra_deg(ra_max_deg)
 
-        ra_out: list[np.ndarray] = []
-        dec_out: list[np.ndarray] = []
-        dec_min_mas = dec_min_deg / _MAS_TO_DEG
-        dec_max_mas = dec_max_deg / _MAS_TO_DEG
+        if a0 <= b0 and abs(ra_max_deg - ra_min_deg) < 360.0:
+            intervals = [(a0, b0)]
+        else:
+            intervals = [(a0, 360.0), (0.0, b0)]
 
-        for zone in zones:
-            mm = self._load_zone(zone)
-            if mm is None:
+        spans: List[Ucac5Span] = []
+        for zone in range(z0, z1 + 1):
+            for a, b in intervals:
+                a = max(0.0, min(359.999999999, a))
+                b = max(0.0, min(359.999999999, b))
+
+                bin_a = self.ra_to_bin(a)
+                bin_b = self.ra_to_bin(b)
+
+                # If the interval is tiny, still include that bin
+                if a <= b:
+                    for bin_ in range(bin_a, bin_b + 1):
+                        start, count = self.get_start_count(zone, bin_)
+                        if count > 0:
+                            spans.append(Ucac5Span(zone=zone, start=start, count=count))
+
+        # Merge adjacent spans within same zone to reduce reads
+        spans.sort(key=lambda s: (s.zone, s.start))
+        merged: List[Ucac5Span] = []
+        for s in spans:
+            if not merged or merged[-1].zone != s.zone:
+                merged.append(s)
                 continue
-            ra_mas = mm["ra"]
-            dec_mas = mm["dec"]
-            for ra_start_deg, ra_end_deg in intervals:
-                ra_start_mas = ra_start_deg / _MAS_TO_DEG
-                ra_end_mas = ra_end_deg / _MAS_TO_DEG
-                lo = np.searchsorted(ra_mas, ra_start_mas, side="left")
-                hi = np.searchsorted(ra_mas, ra_end_mas, side="right")
-                if hi <= lo:
-                    continue
-                ra_slice = ra_mas[lo:hi:thin]
-                dec_slice = dec_mas[lo:hi:thin]
-                mask = (dec_slice >= dec_min_mas) & (dec_slice <= dec_max_mas)
-                if not np.any(mask):
-                    continue
-                ra_out.append(ra_slice[mask].astype(np.float64) * _MAS_TO_DEG)
-                dec_out.append(dec_slice[mask].astype(np.float64) * _MAS_TO_DEG)
+            prev = merged[-1]
+            if prev.start + prev.count == s.start:
+                merged[-1] = Ucac5Span(zone=prev.zone, start=prev.start, count=prev.count + s.count)
+            else:
+                merged.append(s)
 
-        if not ra_out:
-            return Ucac5QueryResult(np.empty(0), np.empty(0))
-
-        return Ucac5QueryResult(np.concatenate(ra_out), np.concatenate(dec_out))
-
-
-def _zones_for_dec_range(dec_min_deg: float, dec_max_deg: float) -> Iterable[int]:
-    zone_min = int(np.floor(dec_min_deg + 90.0))
-    zone_max = int(np.floor(dec_max_deg + 90.0))
-    zone_min = max(0, min(179, zone_min))
-    zone_max = max(0, min(179, zone_max))
-    return range(zone_min, zone_max + 1)
-
-
-def _ra_intervals(ra_min_deg: float, ra_max_deg: float) -> Tuple[Tuple[float, float], ...]:
-    if ra_min_deg <= ra_max_deg:
-        return ((ra_min_deg, ra_max_deg),)
-    return ((ra_min_deg, 360.0), (0.0, ra_max_deg))
+        return merged

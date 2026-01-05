@@ -104,9 +104,7 @@ class PlateSolveConfig:
 
 @dataclass
 class AtlasConfig:
-    ucac4_root: Optional[Path] = None
-    ucac5_root: Optional[Path] = None
-    catalog: str = "ucac4"
+    catalog: str = "ucac5"
     catalog_roots: Mapping[str, Path] = field(default_factory=dict)
     timeout_s: Optional[float] = None
     max_catalog_stars: int = 400
@@ -122,14 +120,6 @@ class AtlasConfig:
         catalog = self.catalog.strip().lower()
         if catalog in self.catalog_roots:
             return catalog, self.catalog_roots[catalog]
-        if catalog == "ucac4":
-            if self.ucac4_root is None:
-                raise ValueError("ucac4_root must be provided for UCAC4 catalog")
-            return catalog, self.ucac4_root
-        if catalog == "ucac5":
-            if self.ucac5_root is None:
-                raise ValueError("ucac5_root must be provided for UCAC5 catalog")
-            return catalog, self.ucac5_root
         raise ValueError(f"Unsupported catalog: {self.catalog}")
 
 
@@ -528,8 +518,8 @@ class AtlasBackend:
 
         result = atlas_solve(
             request.image_path,
+            catalog,
             catalog_root,
-            catalog=catalog,
             ra0_deg=float(request.ra_hours) * 15.0,
             dec0_deg=float(request.dec_degs),
             scale_range_arcsec_per_pix=(float(request.min_scale), float(request.max_scale)),

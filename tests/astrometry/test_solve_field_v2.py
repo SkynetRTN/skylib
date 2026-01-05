@@ -197,8 +197,12 @@ def test_solve_field_v2_atlas_samples() -> None:
     if not ucac4_root or not Path(ucac4_root).exists():
         pytest.skip("UCAC4 root path not configured or missing")
 
+    ucac5_root = os.getenv("SKYLIB_UCAC5_ROOT")
+    if not ucac5_root or not Path(ucac5_root).exists():
+        pytest.skip("UCAC5 root path not configured or missing")
+
     samples = _get_samples("atlas")
-    config = AtlasConfig(ucac4_root=Path(ucac4_root))
+    config = AtlasConfig(catalog="ucac5",catalog_roots={"ucac4": Path(ucac4_root), "ucac5": Path(ucac5_root)})
 
     for sample in samples:
         image_path = _sample_image_path(sample)
