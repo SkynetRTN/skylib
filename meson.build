@@ -2,9 +2,9 @@ project(
     'skylib',
     'c',
     version: run_command(
-        'python',
-        ['-c', 'import sys; sys.path = ["."]; from skylib import __version__; print(__version__, end="")'],
-        check: true
+    'python',
+    ['-c', 'import re, pathlib; s=pathlib.Path("skylib/_version.py").read_text(); m=re.search(r"^__version__\\s*=\\s*[\'\\"]([^\'\\"]+)[\'\\"]", s, re.M); print(m.group(1), end="")'],
+    check: true
     ).stdout().strip(),
     meson_version: '>=1.6.0',
     default_options: [

@@ -492,12 +492,7 @@ class AtlasBackend:
     name = "atlas"
 
     def is_available(self) -> bool:
-        try:  # pragma: no cover - optional dependency
-            from skylib.astrometry.atlas.solve.solver import solve_assisted  # noqa: F401
-
-            return True
-        except Exception:
-            return False
+        return True
 
     def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
         if not isinstance(config, AtlasConfig):

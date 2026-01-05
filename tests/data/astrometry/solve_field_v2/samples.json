@@ -1,14 +1,14 @@
 {
   "astap": [],
-  "atlas": [],
-  "platesolve": [
+  "atlas": [
     {
       "image": "001.fits",
       "ra_hours": 0.0,
       "dec_degs": 0.0,
-      "radius": 0.0,
-      "fov": 0.0
+      "radius": 2.0,
+      "fov": 13.6
     }
   ],
+  "platesolve": [],
   "an": []
 }

@@ -87,7 +87,7 @@ def _extract_xy(image_path: Path, max_sources: int | None) -> tuple[np.ndarray, 
 
 
 def _maybe_save_sources(image_path: Path, data: np.ndarray, xy: np.ndarray, *, label: str) -> None:
-    if not os.getenv("SKLIB_DEBUG_SOURCES"):
+    if not os.getenv("SKYLIB_DEBUG_SOURCES"):
         return
     if importlib.util.find_spec("matplotlib") is None:
         return
@@ -193,7 +193,7 @@ def test_solve_field_v2_astrometry_net_samples() -> None:
 
 
 def test_solve_field_v2_atlas_samples() -> None:
-    ucac4_root = os.getenv("SKLIB_UCAC4_ROOT")
+    ucac4_root = os.getenv("SKYLIB_UCAC4_ROOT")
     if not ucac4_root or not Path(ucac4_root).exists():
         pytest.skip("UCAC4 root path not configured or missing")
 
@@ -201,7 +201,7 @@ def test_solve_field_v2_atlas_samples() -> None:
     config = AtlasConfig(ucac4_root=Path(ucac4_root))
 
     for sample in samples:
-        image_path = _sample_image_path("atlas", sample)
+        image_path = _sample_image_path(sample)
         request = _solve_request_from_sample(sample, image_path)
         solution = solve_field_v2(request, backend="atlas", configs={"atlas": config})
         assert solution.backend == "atlas"

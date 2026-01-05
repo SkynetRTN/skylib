@@ -56,8 +56,8 @@ Example:
 
 Environment variables used by the tests:
 
-- `SKLIB_ASTAP_CMD`: path to `astap_cli` (defaults to `astap_cli`).
-- `SKLIB_ASTAP_CATALOG`: path to ASTAP star catalog directory (required).
-- `SKLIB_PLATESOLVE_CMD`: path to PlateSolve executable.
-- `SKLIB_PLATESOLVE_CWD`: optional working directory for PlateSolve.
-- `SKLIB_ASTROMETRYNET_INDEX_PATH`: one or more index paths (separated by your OS path separator).
+- `SKYLIB_ASTAP_CMD`: path to `astap_cli` (defaults to `astap_cli`).
+- `SKYLIB_ASTAP_CATALOG`: path to ASTAP star catalog directory (required).
+- `SKYLIB_PLATESOLVE_CMD`: path to PlateSolve executable.
+- `SKYLIB_PLATESOLVE_CWD`: optional working directory for PlateSolve.
+- `SKYLIB_ASTROMETRYNET_INDEX_PATH`: one or more index paths (separated by your OS path separator).
