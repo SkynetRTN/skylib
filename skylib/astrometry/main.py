@@ -18,6 +18,8 @@ from astropy.wcs import Sip, WCS
 
 from skylib.util.angle import angdist
 
+from .atlas.solve.solver import solve as atlas_solve
+
 try:  # pragma: no cover - optional dependency
     from . import an_engine
 except Exception:  # pragma: no cover - missing optional dependency
@@ -500,13 +502,12 @@ class AtlasBackend:
         if request.image_path is None:
             raise ValueError("image_path must be provided for UCAC4 backend")
 
-        from skylib.astrometry.atlas.solve.solver import solve_assisted
 
         fov_guess = None
         if request.fov is not None:
             fov_guess = (float(request.fov), float(request.fov))
 
-        result = solve_assisted(
+        result = atlas_solve(
             request.image_path,
             config.ucac4_root,
             ra0_deg=float(request.ra_hours) * 15.0,

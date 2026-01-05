@@ -30,7 +30,7 @@ class SolveResult:
     metadata: dict
 
 
-def solve_assisted(
+def solve(
     fits_path: Path,
     ucac4_root: Path,
     *,
