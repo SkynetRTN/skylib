@@ -432,36 +432,97 @@ class PlateSolveBackend:
         x_size_rad = np.deg2rad(x_size)
         y_size_rad = np.deg2rad(y_size)
 
-        context = {
-            "cmd": config.cmd,
-            "image_path": request.image_path,
-            "ra_hours": request.ra_hours,
-            "dec_degs": request.dec_degs,
-            "radius": request.radius,
-            "fov": request.fov,
-            "width": request.width,
-            "height": request.height,
-            "output_path": output_path,
-            "downsample": request.downsample,
-            "ra_rad": ra_rad,
-            "dec_rad": dec_rad,
-            "x_size_rad": x_size_rad,
-            "y_size_rad": y_size_rad,
-        }
-        cmdline = [config.cmd]
-        for arg in config.args:
-            formatted = arg.format_map(context)
-            if formatted:
-                cmdline.append(formatted)
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_image_path = _inject_platesolve_wcs(
+                request.image_path,
+                Path(tmp),
+                request,
+                x_size=x_size,
+                y_size=y_size,
+            )
 
-        subprocess.run(cmdline, check=False, cwd=str(config.cwd) if config.cwd else None)
+            context = {
+                "cmd": config.cmd,
+                "image_path": temp_image_path,
+                "ra_hours": request.ra_hours,
+                "dec_degs": request.dec_degs,
+                "radius": request.radius,
+                "fov": request.fov,
+                "width": request.width,
+                "height": request.height,
+                "output_path": output_path,
+                "downsample": request.downsample,
+                "ra_rad": ra_rad,
+                "dec_rad": dec_rad,
+                "x_size_rad": x_size_rad,
+                "y_size_rad": y_size_rad,
+            }
+            cmdline = [config.cmd]
+            for arg in config.args:
+                formatted = arg.format_map(context)
+                if formatted:
+                    cmdline.append(formatted)
+
+            subprocess.run(cmdline, check=False, cwd=str(config.cwd) if config.cwd else None)
 
         sol = SolveSolution(backend=self.name)
         if output_path.suffix.lower() == ".txt":
             sol.wcs, sol.metadata = _load_platesolve_solution(output_path)
         else:
             sol.wcs = _load_wcs(output_path)
-        return sol
+    return sol
+
+
+def _inject_platesolve_wcs(
+    image_path: Path,
+    tmp_dir: Path,
+    request: SolveRequest,
+    *,
+    x_size: float,
+    y_size: float,
+) -> Path:
+    if x_size <= 0 or y_size <= 0:
+        return image_path
+
+    try:
+        with fits.open(image_path) as hdul:
+            hdu = hdul[0]
+            data = hdu.data
+            header = hdu.header.copy()
+    except Exception:
+        return image_path
+
+    if data is None or data.ndim < 2:
+        return image_path
+
+    width = request.width or data.shape[1]
+    height = request.height or data.shape[0]
+    if width <= 0 or height <= 0:
+        return image_path
+
+    ra_deg = float(request.ra_hours) * 15.0
+    dec_deg = float(request.dec_degs)
+    scale_x = x_size / float(width)
+    scale_y = y_size / float(height)
+    crpix1 = (float(width) + 1.0) / 2.0
+    crpix2 = (float(height) + 1.0) / 2.0
+
+    header["WCSAXES"] = 2
+    header["CTYPE1"] = "RA---TAN"
+    header["CTYPE2"] = "DEC--TAN"
+    header["CUNIT1"] = "deg"
+    header["CUNIT2"] = "deg"
+    header["CRVAL1"] = ra_deg
+    header["CRVAL2"] = dec_deg
+    header["CRPIX1"] = crpix1
+    header["CRPIX2"] = crpix2
+    header["CDELT1"] = -scale_x
+    header["CDELT2"] = scale_y
+    header["EQUINOX"] = 2000.0
+
+    output_path = tmp_dir / f"{image_path.stem}_platesolve_wcs.fits"
+    fits.PrimaryHDU(data=data, header=header).writeto(output_path, overwrite=True)
+    return output_path
 
 
 def solve_field_v2(
