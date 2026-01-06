@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +25,7 @@ except Exception:  # pragma: no cover
     from skylib.astrometry.atlas.match.triangles import cKDTree
 
 ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
+LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class SolveResult:
@@ -94,7 +96,11 @@ def solve(
         obs_xy_match = obs_xy
 
     if config.debug:
-        print(f"obs sources (raw): n={len(obs_xy)} ; using for match/verify: n={len(obs_xy_match)}")
+        LOGGER.debug(
+            "obs sources (raw): n=%s ; using for match/verify: n=%s",
+            len(obs_xy),
+            len(obs_xy_match),
+        )
 
 
     if obs_xy_match.size == 0:
@@ -105,7 +111,7 @@ def solve(
     if fov_guess_deg is None:
         return SolveResult(False, None, {"reason": "missing_fov"})
     
-    print(f"FOV GUESS: {fov_guess_deg}")
+    LOGGER.info("FOV GUESS: %s", fov_guess_deg)
 
     # ---- Stage 0: single catalog query with conservative padded footprint ----
     catalog_pad_frac = config.catalog_pad_frac
@@ -131,7 +137,10 @@ def solve(
     dec_half = half_diag_deg
     ra_half = half_diag_deg / cos_dec
 
-    print(f"searching: {(ra0_deg - ra_half, ra0_deg + ra_half, dec0_deg - dec_half, dec0_deg + dec_half)}")
+    LOGGER.info(
+        "searching: %s",
+        (ra0_deg - ra_half, ra0_deg + ra_half, dec0_deg - dec_half, dec0_deg + dec_half),
+    )
 
     catalog_name, catalog_root = config.resolve_catalog()
     catalog_index = _catalog_index(catalog_name, catalog_root)
@@ -190,10 +199,29 @@ def solve(
     cat_tree = cKDTree(cat_xy)
     tol_rad = np.deg2rad(config.match_tol_arcsec / 3600.0)
 
-    print(f"calling match triangles: (obs_tri={len(obs_tri.triangles)}, cat_tri={len(cat_tri.triangles)})")
-    print(f"obs sources: n={len(obs_xy_match)}  tol_arcsec={config.match_tol_arcsec}  invariant_tol={config.invariant_tol}")
-    print(f"scale gate: a_min={a_min:.3e} rad/pix  a_max={a_max:.3e} rad/pix  (min={min_scale} max={max_scale} arcsec/pix)")
-    print(f"cat stars used: n={len(cat_xy)}  (max_catalog_stars={config.max_catalog_stars})")
+    LOGGER.info(
+        "calling match triangles: (obs_tri=%s, cat_tri=%s)",
+        len(obs_tri.triangles),
+        len(cat_tri.triangles),
+    )
+    LOGGER.info(
+        "obs sources: n=%s  tol_arcsec=%s  invariant_tol=%s",
+        len(obs_xy_match),
+        config.match_tol_arcsec,
+        config.invariant_tol,
+    )
+    LOGGER.info(
+        "scale gate: a_min=%.3e rad/pix  a_max=%.3e rad/pix  (min=%s max=%s arcsec/pix)",
+        a_min,
+        a_max,
+        min_scale,
+        max_scale,
+    )
+    LOGGER.info(
+        "cat stars used: n=%s  (max_catalog_stars=%s)",
+        len(cat_xy),
+        config.max_catalog_stars,
+    )
 
     best = _match_triangles(
         obs_tri,
@@ -233,8 +261,8 @@ def solve(
     COARSE_MAX_RMS_ARCSEC = 2.5
 
     if config.debug:
-        print(
-            "verify coarse:",
+        LOGGER.debug(
+            "verify coarse: %s",
             {
                 "score": coarse_score,
                 "inliers": coarse_inliers,
@@ -252,9 +280,10 @@ def solve(
         or not np.isfinite(coarse_score)
     ):
         if config.debug:
-            print(
-                f"Rejecting candidate at coarse verify: "
-                f"inliers={coarse_inliers} rms={coarse_rms_arcsec:.3f} arcsec"
+            LOGGER.debug(
+                "Rejecting candidate at coarse verify: inliers=%s rms=%.3f arcsec",
+                coarse_inliers,
+                coarse_rms_arcsec,
             )
         return SolveResult(False, None, {"reason": "no_confident_match_coarse"})
 
@@ -279,8 +308,8 @@ def solve(
     TIGHT_MAX_RMS_ARCSEC = 1.5
 
     if config.debug:
-        print(
-            "verify tight:",
+        LOGGER.debug(
+            "verify tight: %s",
             {
                 "score": tight_score,
                 "inliers": tight_inliers,
@@ -310,8 +339,8 @@ def solve(
         mid_frac = mid_inliers / max(len(obs_xy_match), 1)
 
         if config.debug:
-            print(
-                "verify mid:",
+            LOGGER.debug(
+                "verify mid: %s",
                 {
                     "score": mid_score,
                     "inliers": mid_inliers,
@@ -333,9 +362,10 @@ def solve(
             or not np.isfinite(mid_score)
         ):
             if config.debug:
-                print(
-                    "Rejecting candidate at tight verify: "
-                    f"inliers={tight_inliers} rms={tight_rms_arcsec:.3f} arcsec"
+                LOGGER.debug(
+                    "Rejecting candidate at tight verify: inliers=%s rms=%.3f arcsec",
+                    tight_inliers,
+                    tight_rms_arcsec,
                 )
             return SolveResult(
                 False,
@@ -382,7 +412,11 @@ def solve(
         center_ra, center_dec = wcs.pixel_to_world_values(cx0, cy0)
 
         if config.debug:
-            print(f"Refined center (from WCS @ image center): RA={center_ra:.6f} DEC={center_dec:.6f}")
+            LOGGER.debug(
+                "Refined center (from WCS @ image center): RA=%.6f DEC=%.6f",
+                center_ra,
+                center_dec,
+            )
 
         # Store refined center in metadata only
         refined_center_ra_deg = float(center_ra) % 360.0
@@ -598,8 +632,8 @@ def _match_triangles(
                 best_updates += 1
                 if debug:
                     # Print enough to identify if this is "real-ish"
-                    print(
-                        "new best:",
+                    LOGGER.debug(
+                        "new best: %s",
                         {
                             "score": best_score,
                             "inliers": best_inliers,
@@ -609,8 +643,8 @@ def _match_triangles(
                     )
 
     if debug:
-        print(
-            "match_triangles summary:",
+        LOGGER.debug(
+            "match_triangles summary: %s",
             {
                 "obs_triangles": int(len(obs_tri.triangles)),
                 "cat_triangles": int(len(cat_tri.triangles)),
@@ -636,10 +670,10 @@ def _match_triangles(
         )
         if topk:
             topk.sort(key=lambda t: t[0], reverse=True)
-            print("top candidates (score, inliers, rms_arcsec, scale_arcsec_per_pix):")
+            LOGGER.debug("top candidates (score, inliers, rms_arcsec, scale_arcsec_per_pix):")
             for s, inl, rms, sc in topk[:10]:
-                print(
-                    "  ",
+                LOGGER.debug(
+                    "  %s",
                     (
                         s,
                         inl,
