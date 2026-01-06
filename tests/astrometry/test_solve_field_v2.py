@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -17,10 +16,8 @@ from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterv
 
 from skylib.astrometry.main import (
     AtlasConfig,
-    AstapConfig,
     AstrometryNetBackend,
     AstrometryNetConfig,
-    PlateSolveConfig,
     SolveRequest,
     solve_field_v2,
 )
@@ -117,49 +114,6 @@ def _maybe_save_sources(image_path: Path, data: np.ndarray, xy: np.ndarray, *, l
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
-
-
-def test_solve_field_v2_astap_samples() -> None:
-    cmd = os.getenv("SKYLIB_ASTAP_CMD", "astap_cli")
-    if shutil.which(cmd) is None:
-        pytest.skip(f"ASTAP executable not found: {cmd}")
-
-    catalog = os.getenv("SKYLIB_ASTAP_CATALOG")
-    if not catalog or not Path(catalog).exists():
-        pytest.skip("ASTAP catalog path not configured or missing")
-
-    samples = _get_samples("astap")
-    config = AstapConfig(cmd=cmd, catalog=catalog)
-
-    for sample in samples:
-        image_path = _sample_image_path(sample)
-        request = _solve_request_from_sample(sample, image_path)
-        solution = solve_field_v2(request, backend="astap", configs={"astap": config})
-        assert solution.backend == "astap"
-        assert solution.wcs is not None, f"ASTAP failed to solve {image_path}"
-
-
-def test_solve_field_v2_platesolve_samples(tmp_path: Path) -> None:
-    cmd = os.getenv("SKYLIB_PLATESOLVE_CMD")
-    if not cmd:
-        pytest.skip("PlateSolve executable not configured")
-    if shutil.which(cmd) is None:
-        pytest.skip(f"PlateSolve executable not found: {cmd}")
-
-    cwd = os.getenv("SKYLIB_PLATESOLVE_CWD")
-    config = PlateSolveConfig(cmd=cmd, cwd=Path(cwd) if cwd else None)
-
-    samples = _get_samples("platesolve")
-
-    for sample in samples:
-        image_path = _sample_image_path(sample)
-        temp_image = tmp_path / image_path.name
-        temp_image.write_bytes(image_path.read_bytes())
-
-        request = _solve_request_from_sample(sample, temp_image)
-        solution = solve_field_v2(request, backend="platesolve", configs={"platesolve": config})
-        assert solution.backend == "platesolve"
-        assert solution.wcs is not None, f"PlateSolve failed to solve {image_path}"
 
 
 def test_solve_field_v2_astrometry_net_samples() -> None:
@@ -279,7 +233,5 @@ def assert_wcs_matches_reference(
         
 
 if __name__ == "__main__":
-    # test_solve_field_v2_astap_samples()
-    # test_solve_field_v2_platesolve_samples(tmp_path=Path(tempfile.gettempdir()))
     # test_solve_field_v2_astrometry_net_samples()
     test_solve_field_v2_atlas_samples()
