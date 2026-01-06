@@ -2,499 +2,26 @@
 
 from __future__ import annotations
 
-import os
-import ctypes
-import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Mapping, Optional, Protocol, Sequence, Union
+from typing import Mapping, Optional, Union
 
-import numpy as np
 from astropy.io import fits
-from astropy.wcs import Sip, WCS
+from astropy.wcs import WCS
 
-from skylib.util.angle import angdist
-
-from .atlas import AtlasConfig
-from .atlas.solve.solver import solve as atlas_solve
-
-try:  # pragma: no cover - optional dependency
-    from . import an_engine
-except Exception:  # pragma: no cover - missing optional dependency
-    an_engine = None
+from .astrometry_net import (
+    AstrometryNetBackend,
+    AstrometryNetConfig,
+    AstrometryNetSolver,
+    an_engine,
+    solve_field_glob as solve_field_glob_astrometry_net,
+)
+from .atlas import AtlasBackend, AtlasConfig
+from .types import Backend, SolveRequest, SolveSolution
 
 BackendConfig = Union[
-    "AstrometryNetConfig",
-    "AtlasConfig",
+    AstrometryNetConfig,
+    AtlasConfig,
 ]
-
-
-@dataclass(frozen=True)
-class SolveRequest:
-    xy: Optional[np.ndarray] = None
-    flux: Optional[np.ndarray] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    ra_hours: float = 0.0
-    dec_degs: float = 0.0
-    radius: float = 180.0
-    min_scale: float = 0.1
-    max_scale: float = 10.0
-    fov: Optional[float] = None
-    parity: Optional[bool] = None
-    sip_order: int = 3
-    crpix_center: bool = True
-    max_sources: Optional[int] = None
-    retry_lost: bool = True
-    callback: Optional[Callable[[], int]] = None
-    image_path: Optional[Path] = None
-    downsample: Optional[int] = None
-
-
-@dataclass
-class SolveSolution:
-    wcs: Optional[WCS] = None
-    log_odds: Optional[float] = None
-    n_match: Optional[int] = None
-    n_conflict: Optional[int] = None
-    n_field: Optional[int] = None
-    index_name: Optional[str] = None
-    backend: Optional[str] = None
-    metadata: dict = field(default_factory=dict)
-
-
-class Backend(Protocol):
-    name: str
-
-    def is_available(self) -> bool: ...
-
-    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution: ...
-
-
-@dataclass
-class AstrometryNetConfig:
-    index_path: Optional[Union[str, Sequence[str]]] = None
-    engine: Optional["AstrometryNetSolver"] = None
-
-
-class AstrometryNetSolver:
-    """Astrometry.net engine wrapper."""
-
-    globs = None  # type: list
-
-    def __init__(self, index_path: Union[str, Sequence[str]]):
-        if an_engine is None:
-            raise ImportError("an_engine module not available")
-
-        if isinstance(index_path, str):
-            index_path = [index_path]
-
-        self.solver = an_engine.solver_new()
-
-        self.indexes = []
-        for path in index_path:
-            for fn in Path(path).glob("*"):
-                try:
-                    idx = an_engine.index_load(str(fn), 0, None)
-                    if idx is not None:
-                        self.indexes.append(idx)
-                except Exception:
-                    pass
-
-        if not self.indexes:
-            raise ValueError("No indexes found")
-
-        self.indexes.sort(key=lambda _idx: _idx.nquads)
-
-        self.globs = []
-        ngc_path = Path(__file__).with_name("ngc2000.dat")
-        with ngc_path.open() as handle:
-            for line in handle.read().splitlines():
-                try:
-                    typ = line[6:9].strip()
-                    if typ != "Gb":
-                        continue
-                    ra_h, ra_m = line[10:12], line[13:17]
-                    dec_s, dec_d, dec_m = line[19], line[20:22], line[23:25]
-                    ra = int(ra_h) + float(ra_m) / 60
-                    dec = (1 - 2 * (dec_s == "-")) * (
-                        int(dec_d) + int(dec_m) / 60.0
-                    )
-                    r = float(line[33:38]) / 2
-                    self.globs.append([ra, dec, r / 60])
-                except Exception:
-                    pass
-
-
-class AstrometryNetBackend:
-    name = "an"
-
-    def is_available(self) -> bool:
-        return an_engine is not None
-
-    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
-        if request.xy is None:
-            raise ValueError("xy must be provided")
-
-        if not isinstance(config, AstrometryNetConfig):
-            raise ValueError("Astrometry.net config is required")
-
-        engine = config.engine
-        if engine is None:
-            if config.index_path is None:
-                raise ValueError("index_path or engine must be provided")
-            engine = AstrometryNetSolver(config.index_path)
-
-        solver = engine.solver
-        ra = float(request.ra_hours) * 15
-        dec = float(request.dec_degs)
-        r = float(request.radius)
-
-        if request.callback is not None:
-            if sys.platform.startswith("win32"):
-                time_t = ctypes.c_int64
-            elif ctypes.sizeof(ctypes.c_void_p) == ctypes.sizeof(ctypes.c_int64):
-                time_t = ctypes.c_int64
-            else:
-                time_t = ctypes.c_int32
-            an_engine.set_timer_callback(
-                solver,
-                ctypes.cast(ctypes.CFUNCTYPE(time_t)(request.callback), ctypes.c_voidp).value,
-            )
-        else:
-            an_engine.set_timer_callback(solver, 0)
-
-        n = len(request.xy)
-        xy = np.asanyarray(request.xy)
-        field = an_engine.starxy_new(n, request.flux is not None, False)
-        if request.flux is not None:
-            flux = np.asanyarray(request.flux)
-            if len(flux) != n:
-                raise ValueError("Flux array must be of the same length as XY array")
-            if request.max_sources:
-                order = np.argsort(flux)[::-1]
-                xy, flux = xy[order], flux[order]
-                del order
-            an_engine.starxy_set_flux_array(field, flux)
-        an_engine.starxy_set_xy_array(field, xy.ravel())
-        an_engine.solver_set_field(solver, field)
-
-        try:
-            if request.width:
-                minx, maxx = 1, int(request.width)
-            else:
-                minx, maxx = xy[:, 0].min(), xy[:, 0].max()
-            if request.height:
-                miny, maxy = 1, int(request.height)
-            else:
-                miny, maxy = xy[:, 1].min(), xy[:, 1].max()
-            an_engine.solver_set_field_bounds(solver, minx, maxx, miny, maxy)
-            solver.quadsize_min = 0.1 * min(maxx - minx + 1, maxy - miny + 1)
-
-            if request.crpix_center != "":
-                solver.set_crpix = solver.set_crpix_center = int(request.crpix_center)
-
-            an_engine.solver_set_radec(solver, ra, dec, r)
-
-            solver.funits_lower = float(request.min_scale)
-            solver.funits_upper = float(request.max_scale)
-
-            solver.logratio_tokeep = np.log(1e12)
-            solver.distance_from_quad_bonus = True
-
-            if request.parity is None or request.parity == "":
-                solver.parity = an_engine.PARITY_BOTH
-            elif int(request.parity):
-                solver.parity = an_engine.PARITY_NORMAL
-            else:
-                solver.parity = an_engine.PARITY_FLIP
-
-            enable_sip = request.sip_order and int(request.sip_order) >= 2
-            if enable_sip:
-                solver.do_tweak = True
-                solver.tweak_aborder = int(request.sip_order)
-                solver.tweak_abporder = int(request.sip_order) + 1
-            else:
-                solver.do_tweak = False
-
-            if request.max_sources:
-                solver.endobj = request.max_sources
-            else:
-                solver.endobj = 0
-
-            if request.width is None or request.height is None:
-                width = maxx - minx + 1
-                height = maxy - miny + 1
-            else:
-                width = request.width
-                height = request.height
-
-            fmin = solver.quadsize_min * request.min_scale
-            fmax = np.hypot(width, height) * request.max_scale
-            indices = []
-            for index in engine.indexes:
-                if fmin > index.index_scale_upper or fmax < index.index_scale_lower:
-                    continue
-                if not an_engine.index_is_within_range(index, ra, dec, r):
-                    continue
-
-                indices.append(index)
-
-            if not indices:
-                raise ValueError("No indexes found for the given scale and position")
-
-            indices.sort(
-                key=lambda _idx: (
-                    -_idx.index_scale_upper,
-                    an_engine.healpix_distance_to_radec(
-                        _idx.healpix,
-                        _idx.hpnside,
-                        ra,
-                        dec,
-                    )[0]
-                    if _idx.healpix >= 0
-                    else 0,
-                )
-            )
-            an_engine.solver_clear_indexes(solver)
-            for index in indices:
-                an_engine.solver_add_index(solver, index)
-
-            an_engine.solver_run(solver)
-            sol = SolveSolution(backend=self.name)
-
-            if solver.have_best_match:
-                best_match = solver.best_match
-                sol.log_odds = solver.best_logodds
-                sol.n_match = best_match.nmatch
-                sol.n_conflict = best_match.nconflict
-                sol.n_field = best_match.nfield
-                if best_match.index is not None:
-                    sol.index_name = best_match.index.indexname
-            else:
-                best_match = None
-
-            if solver.best_match_solves:
-                sol.wcs = WCS(naxis=2)
-
-                wcs_ctype = ("RA---TAN", "DEC--TAN")
-                if enable_sip:
-                    sip = best_match.sip
-                    try:
-                        wcstan = sip.wcstan
-                    except AttributeError:
-                        wcstan = best_match.wcstan
-                    else:
-                        a_order, b_order = sip.a_order, sip.b_order
-                        if a_order > 0 or b_order > 0:
-                            ap_order, bp_order = sip.ap_order, sip.bp_order
-                            maxorder = an_engine.SIP_MAXORDER
-                            a = array_from_swig(sip.a, (maxorder, maxorder))[: a_order + 1, : a_order + 1]
-                            b = array_from_swig(sip.b, (maxorder, maxorder))[: b_order + 1, : b_order + 1]
-                            if a.any() or b.any():
-                                ap = array_from_swig(sip.ap, (maxorder, maxorder))[
-                                    : ap_order + 1,
-                                    : ap_order + 1,
-                                ]
-                                bp = array_from_swig(sip.bp, (maxorder, maxorder))[
-                                    : bp_order + 1,
-                                    : bp_order + 1,
-                                ]
-                                sol.wcs.sip = Sip(
-                                    a,
-                                    b,
-                                    ap,
-                                    bp,
-                                    array_from_swig(wcstan.crpix, (2,)),
-                                )
-                                wcs_ctype = ("RA---TAN-SIP", "DEC--TAN-SIP")
-                else:
-                    wcstan = best_match.wcstan
-                sol.wcs.wcs.ctype = wcs_ctype
-                sol.wcs.wcs.crpix = array_from_swig(wcstan.crpix, (2,))
-                sol.wcs.wcs.crval = array_from_swig(wcstan.crval, (2,))
-                sol.wcs.wcs.cd = array_from_swig(wcstan.cd, (2, 2))
-            elif request.retry_lost and (request.radius < 180 or request.parity is not None):
-                an_engine.solver_cleanup_field(solver)
-                retry_request = SolveRequest(
-                    xy=request.xy,
-                    flux=request.flux,
-                    width=request.width,
-                    height=request.height,
-                    ra_hours=0,
-                    dec_degs=0,
-                    radius=180,
-                    min_scale=request.min_scale,
-                    max_scale=request.max_scale,
-                    fov=None,
-                    parity=None,
-                    sip_order=request.sip_order,
-                    crpix_center=request.crpix_center,
-                    max_sources=request.max_sources,
-                    retry_lost=False,
-                    callback=request.callback,
-                )
-                return self.solve(retry_request, config)
-
-            return sol
-        finally:
-            an_engine.solver_cleanup_field(solver)
-            an_engine.solver_clear_indexes(solver)
-
-
-class AtlasBackend:
-    name = "atlas"
-
-    def is_available(self) -> bool:
-        return True
-
-    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
-        if not isinstance(config, AtlasConfig):
-            raise ValueError("Atlas config is required")
-        if request.image_path is None:
-            raise ValueError("image_path must be provided for Atlas backend")
-        
-        catalog_roots = dict(config.catalog_roots) if config.catalog_roots else {}
-
-        if not catalog_roots.get('ucac4'):
-            ucac4_root = os.getenv("SKYLIB_UCAC4_ROOT")
-            if ucac4_root and Path(ucac4_root).exists():
-                catalog_roots['ucac4'] = Path(ucac4_root)
-        
-        config.catalog_roots = catalog_roots
-
-        fov_guess = None
-        if request.fov is not None:
-            fov_guess = (float(request.fov), float(request.fov))
-
-        result = atlas_solve(
-            request.image_path,
-            config,
-            ra0_deg=float(request.ra_hours) * 15.0,
-            dec0_deg=float(request.dec_degs),
-            scale_range_arcsec_per_pix=(float(request.min_scale), float(request.max_scale)),
-            fov_guess_deg=fov_guess,
-        )
-
-        sol = SolveSolution(backend=self.name)
-        sol.wcs = result.wcs
-        sol.metadata = result.metadata
-        return sol
-
-
-def solve_field_v2(
-    request: SolveRequest,
-    backend: Optional[Union[str, Backend]] = None,
-    preferred_backends: Optional[Sequence[Union[str, Backend]]] = None,
-    configs: Optional[Mapping[str, BackendConfig]] = None,
-) -> SolveSolution:
-    registry = {
-        "an": AstrometryNetBackend(),
-        "astrometry.net": AstrometryNetBackend(),
-        "atlas": AtlasBackend(),
-    }
-
-    if configs is None:
-        configs = {}
-
-    def resolve_backend(item: Union[str, Backend]) -> Backend:
-        if isinstance(item, str):
-            if item not in registry:
-                raise ValueError(f"Unknown backend: {item}")
-            return registry[item]
-        return item
-
-    if backend is not None:
-        candidate = resolve_backend(backend)
-        if not candidate.is_available():
-            raise ValueError(f"Requested backend is not available: {candidate.name}")
-        selected = [candidate]
-    elif preferred_backends is not None:
-        selected = [resolve_backend(item) for item in preferred_backends]
-    else:
-        default = ["an", "atlas"] if an_engine is not None else ["atlas"]
-        selected = [resolve_backend(item) for item in default]
-
-    last_solution = SolveSolution()
-    for candidate in selected:
-        if not candidate.is_available():
-            continue
-        cfg = configs.get(candidate.name)
-        if cfg is None and candidate.name == "an":
-            cfg = configs.get("astrometry.net")
-        last_solution = candidate.solve(request, cfg)
-        if last_solution.wcs is not None:
-            print(last_solution.metadata)
-            return last_solution
-
-    return last_solution
-
-
-def solve_field_glob_v2(
-    request: SolveRequest,
-    config: AstrometryNetConfig,
-    min_sources: int = 10,
-    initial_radius: float = 1,
-    radius_step: float = 0.8,
-) -> SolveSolution:
-    backend = AstrometryNetBackend()
-    sol = backend.solve(request, config)
-    engine = config.engine
-    if engine is None:
-        if config.index_path is None:
-            raise ValueError("index_path or engine must be provided")
-        engine = AstrometryNetSolver(config.index_path)
-
-    if sol.wcs is not None and request.xy is not None and len(request.xy) >= min_sources:
-        n = len(request.xy)
-        xy = np.asarray(request.xy)
-        flux = np.asarray(request.flux) if request.flux is not None else np.zeros(n)
-        ra, dec = sol.wcs.all_pix2world(xy[:, 0], xy[:, 1], 1)
-        ra %= 360
-        ra /= 15
-        radius = (dec.max() - dec.min()) / 2
-        for ra0, dec0, r0 in engine.globs:
-            r = r0 * initial_radius
-            found = False
-            prev_num_outer = None
-            while True:
-                inner = angdist(ra0, dec0, ra, dec) < r
-                num_inner = inner.sum()
-                if not num_inner:
-                    break
-
-                found = True
-
-                outer = ~inner
-                num_outer = n - num_inner
-                if num_outer >= min_sources and num_outer != prev_num_outer:
-                    prev_num_outer = num_outer
-                    new_request = SolveRequest(
-                        xy=xy[outer],
-                        flux=flux[outer],
-                        width=request.width,
-                        height=request.height,
-                        ra_hours=sol.wcs.wcs.crval[0] / 15,
-                        dec_degs=sol.wcs.wcs.crval[1],
-                        radius=radius,
-                        min_scale=request.min_scale,
-                        max_scale=request.max_scale,
-                        parity=request.parity,
-                        sip_order=0,
-                        crpix_center=request.crpix_center,
-                        max_sources=request.max_sources,
-                        retry_lost=False,
-                        callback=request.callback,
-                    )
-                    new_sol = backend.solve(new_request, config)
-                    if new_sol.wcs is not None:
-                        sol = new_sol
-                        break
-
-                r *= radius_step
-            if found:
-                break
-    return sol
 
 
 Solver = AstrometryNetSolver
@@ -530,8 +57,13 @@ def solve_field(
     """Obtain astrometric solution given XY coordinates of field stars."""
 
     if backend is None:
-        backend = "an" if an_engine is not None else "atlas"
-    elif backend in {"an", "astrometry.net"} and an_engine is None:
+        backend = "an"
+    if backend not in {"an", "astrometry.net"}:
+        raise ValueError(
+            "solve_field only wraps the Astrometry.net backend; "
+            "use AtlasBackend directly for Atlas solving",
+        )
+    if an_engine is None:
         raise ValueError("Astrometry.net backend is not available on this system")
 
     request = SolveRequest(
@@ -555,20 +87,11 @@ def solve_field(
         downsample=downsample,
     )
 
-    configs = {}
-    if backend in {"an", "astrometry.net"}:
-        if engine is None:
-            raise ValueError("engine must be provided for Astrometry.net backend")
-        configs["an"] = AstrometryNetConfig(engine=engine)
-    elif backend == "atlas":
-        configs["atlas"] = AtlasConfig(
-            ucac4_root=ucac4_root,
-            ucac5_root=ucac5_root,
-            catalog=atlas_catalog,
-            catalog_roots=atlas_catalog_roots or {},
-        )
-
-    return solve_field_v2(request, backend=backend, configs=configs)
+    if engine is None:
+        raise ValueError("engine must be provided for Astrometry.net backend")
+    config = AstrometryNetConfig(engine=engine)
+    backend_instance = AstrometryNetBackend()
+    return backend_instance.solve(request, config)
 
 
 def solve_field_glob(
@@ -613,7 +136,7 @@ def solve_field_glob(
     )
 
     config = AstrometryNetConfig(engine=engine)
-    return solve_field_glob_v2(
+    return solve_field_glob_astrometry_net(
         request,
         config,
         min_sources=min_sources,
@@ -636,12 +159,6 @@ def _load_wcs(path: Path) -> Optional[WCS]:
             return None
 
 
-def array_from_swig(data, shape, dtype=np.float64):
-    a = np.empty(shape, dtype)
-    ctypes.memmove(a.ctypes, int(data), a.nbytes)
-    return a
-
-
 __all__ = [
     "AstrometryNetBackend",
     "AstrometryNetConfig",
@@ -655,7 +172,5 @@ __all__ = [
     "Solution",
     "solve_field",
     "solve_field_glob",
-    "solve_field_v2",
-    "solve_field_glob_v2",
     "an_engine",
 ]
