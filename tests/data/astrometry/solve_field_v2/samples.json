@@ -1,5 +1,4 @@
 {
-  "astap": [],
   "atlas": [
     {
       "image": "001.fits",
@@ -65,6 +64,5 @@
       "wcs": "007_wcs.fits"
     }
   ],
-  "platesolve": [],
   "an": []
 }
