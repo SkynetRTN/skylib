@@ -32,9 +32,10 @@ if windows
     add_project_arguments(['-include', extra + 'an-defs.h', '-D_POSIX', '-D_POSIX_C_SOURCE'], language: 'c')
 endif
 
-foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry/atlas', 'skylib/astrometry/atlas/catalog',
-            'skylib/astrometry/atlas/extract', 'skylib/astrometry/atlas/match', 'skylib/astrometry/atlas/solve',
-            'skylib/astrometry/atlas/wcs', 'skylib/calibration', 'skylib/color', 'skylib/combine',
+foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry/anet', 'skylib/astrometry/atlas',
+            'skylib/astrometry/atlas/catalog', 'skylib/astrometry/atlas/extract', 'skylib/astrometry/atlas/match',
+            'skylib/astrometry/atlas/solve', 'skylib/astrometry/atlas/wcs', 'skylib/calibration', 'skylib/color',
+            'skylib/combine',
             'skylib/enhancement', 'skylib/ephem', 'skylib/extraction', 'skylib/io', 'skylib/photometry',
             'skylib/sonification', 'skylib/util']
     sources = run_command(
@@ -43,12 +44,12 @@ foreach p: ['skylib', 'skylib/astrometry', 'skylib/astrometry/atlas', 'skylib/as
     py.install_sources(sources, subdir: p)
 endforeach
 
-py.install_sources(['skylib/astrometry/ngc2000.dat'], subdir: 'skylib/astrometry')
+py.install_sources(['skylib/astrometry/anet/ngc2000.dat'], subdir: 'skylib/astrometry/anet')
 py.install_sources(['skylib/sonification/start.wav', 'skylib/sonification/stop.wav'], subdir: 'skylib/sonification')
 py.install_sources(['scripts/fits2wav.py'], subdir: 'skylib/scripts')
 
 # Astrometry.net source files
-an_engine_sources = ['skylib/astrometry/an_engine_wrap.c']
+an_engine_sources = ['skylib/astrometry/anet/an_engine_wrap.c']
 foreach fn: [
         'an-endian', 'bl', 'codekd', 'datalog', 'errors', 'fit-wcs', 'fitsbin', 'fitsfile', 'fitsioutils', 'fitstable',
         'gslutils', 'healpix', 'index', 'log', 'matchobj', 'mathutil', 'permutedsort', 'quadfile', 'sip', 'sip-utils',
@@ -201,6 +202,6 @@ if not windows
         link_with: libs,
         include_directories: include_directories(include_dirs),
         install: true,
-        subdir: 'skylib/astrometry',
+        subdir: 'skylib/astrometry/anet',
     )
 endif

@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Union
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from .astrometry_net import (
+from .anet import (
     AstrometryNetBackend,
     AstrometryNetConfig,
     AstrometryNetSolver,
