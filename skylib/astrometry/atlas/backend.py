@@ -26,10 +26,10 @@ class AtlasBackend:
 
         catalog_roots = dict(config.catalog_roots) if config.catalog_roots else {}
 
-        if not catalog_roots.get("ucac4"):
-            ucac4_root = os.getenv("SKYLIB_UCAC4_ROOT")
-            if ucac4_root and Path(ucac4_root).exists():
-                catalog_roots["ucac4"] = Path(ucac4_root)
+        if not catalog_roots.get("ucac5"):
+            ucac5_root = os.getenv("SKYLIB_UCAC5_ROOT")
+            if ucac5_root and Path(ucac5_root).exists():
+                catalog_roots["ucac5"] = Path(ucac5_root)
 
         config.catalog_roots = catalog_roots
 
