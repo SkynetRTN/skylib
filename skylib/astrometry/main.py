@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import ctypes
 import sys
 from dataclasses import dataclass, field
@@ -352,6 +353,15 @@ class AtlasBackend:
             raise ValueError("Atlas config is required")
         if request.image_path is None:
             raise ValueError("image_path must be provided for Atlas backend")
+        
+        catalog_roots = dict(config.catalog_roots) if config.catalog_roots else {}
+
+        if not catalog_roots.get('ucac4'):
+            ucac4_root = os.getenv("SKYLIB_UCAC4_ROOT")
+            if ucac4_root and Path(ucac4_root).exists():
+                catalog_roots['ucac4'] = Path(ucac4_root)
+        
+        config.catalog_roots = catalog_roots
 
         fov_guess = None
         if request.fov is not None:
