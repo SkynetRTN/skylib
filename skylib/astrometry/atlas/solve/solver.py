@@ -31,32 +31,6 @@ class SolveResult:
     wcs: Optional[WCS]
     metadata: dict
 
-def _solve_center_from_similarity(
-    width: int,
-    height: int,
-    scale: float,
-    rotation: np.ndarray,
-    translation: np.ndarray,
-    ra0_deg: float,
-    dec0_deg: float,
-) -> tuple[float, float]:
-    """Compute RA/Dec of the image center from the similarity transform."""
-    cx = (width + 1) / 2.0
-    cy = (height + 1) / 2.0
-    # predicted tangent-plane coord (xi, eta) in radians
-    xi_eta = (np.array([[cx, cy]]) @ rotation.T) * scale + translation
-    xi, eta = float(xi_eta[0, 0]), float(xi_eta[0, 1])
-
-    # Invert gnomonic projection: (xi,eta) -> (ra,dec) around (ra0,dec0)
-    ra0 = np.deg2rad(ra0_deg)
-    dec0 = np.deg2rad(dec0_deg)
-
-    denom = np.cos(dec0) - eta * np.sin(dec0)
-    ra = ra0 + np.arctan2(xi, denom)
-    dec = np.arctan2(np.sin(dec0) + eta * np.cos(dec0), np.sqrt(xi * xi + denom * denom))
-
-    return float(np.rad2deg(ra) % 360.0), float(np.rad2deg(dec))
-
 def _verify_candidate(
     obs_xy: np.ndarray,
     cat_tree: cKDTree,
@@ -95,14 +69,35 @@ def solve(
     sources = extract_sources(
         fits_path,
         max_sources=config.max_image_stars,
-        crop_fraction=0.8,
+        crop_fraction=1.0,
         downsample=1,
+        edge_margin=8,
+        sn_thresh=5.0,
+        peak_sn_thresh=8.0,
+        min_area=5,
+        max_elong=50.0,   # if you want to tolerate long trails
         debug_overlay_path=debug_overlay_path,
-        peakmax=40000
     )
     obs_xy = sources.xy
     height, width = sources.shape
-    if obs_xy.size == 0:
+
+    # ---- Dense-field handling: match/verify only on brightest sources ----
+    # In globular clusters / crowded fields, many detections are real but *not* in the catalog
+    # (too faint, blended, missing from UCAC5). Using all sources makes "inlier fraction"
+    # meaningless and increases false local correspondences.
+    max_match_sources = int(getattr(config, "max_match_sources", 180))
+    if obs_xy.shape[0] > max_match_sources and hasattr(sources, "flux") and sources.flux.size == obs_xy.shape[0]:
+        order = np.argsort(sources.flux)[::-1]  # brightest first
+        keep = order[:max_match_sources]
+        obs_xy_match = obs_xy[keep]
+    else:
+        obs_xy_match = obs_xy
+
+    if config.debug:
+        print(f"obs sources (raw): n={len(obs_xy)} ; using for match/verify: n={len(obs_xy_match)}")
+
+
+    if obs_xy_match.size == 0:
         return SolveResult(False, None, {"reason": "no_sources"})
 
     if fov_guess_deg is None:
@@ -112,17 +107,31 @@ def solve(
     
     print(f"FOV GUESS: {fov_guess_deg}")
 
-    ra_width, dec_height = fov_guess_deg
-    pad = 1.3
-    ra_width *= pad
-    dec_height *= pad
+    # ---- Stage 0: single catalog query with conservative padded footprint ----
+    catalog_pad_frac = config.catalog_pad_frac
+    catalog_max_radius_deg = config.catalog_max_radius_deg
 
+    half_diag_deg = _search_half_diag_deg(
+        width,
+        height,
+        scale_range_arcsec_per_pix,
+        fov_guess_deg,
+        pad_frac=catalog_pad_frac,
+    )
+    if half_diag_deg <= 0:
+        return SolveResult(False, None, {"reason": "bad_fov_or_scale"})
+
+    if catalog_max_radius_deg is not None:
+        half_diag_deg = min(float(half_diag_deg), float(catalog_max_radius_deg))
+
+    # Convert "radius" into a RA/Dec box (box is conservative; good for your zone-based catalog query)
     cos_dec = np.cos(np.deg2rad(dec0_deg))
     cos_dec = max(0.2, float(abs(cos_dec)))
-    ra_half = (ra_width / cos_dec) / 2
-    dec_half = dec_height / 2 
 
-    print(f"searching: {ra0_deg - ra_half, ra0_deg + ra_half, dec0_deg - dec_half, dec0_deg + dec_half}")
+    dec_half = half_diag_deg
+    ra_half = half_diag_deg / cos_dec
+
+    print(f"searching: {(ra0_deg - ra_half, ra0_deg + ra_half, dec0_deg - dec_half, dec0_deg + dec_half)}")
 
     catalog_name, catalog_root = config.resolve_catalog()
     catalog_index = _catalog_index(catalog_name, catalog_root)
@@ -160,7 +169,7 @@ def solve(
     max_side_pix = 2000
 
     obs_tri = sample_triangles(
-        obs_xy,
+        obs_xy_match,
         config.n_tri_obs,
         min_side=min_side_pix,
         max_side=max_side_pix,
@@ -182,7 +191,7 @@ def solve(
     tol_rad = np.deg2rad(config.match_tol_arcsec / 3600.0)
 
     print(f"calling match triangles: (obs_tri={len(obs_tri.triangles)}, cat_tri={len(cat_tri.triangles)})")
-    print(f"obs sources: n={len(obs_xy)}  tol_arcsec={config.match_tol_arcsec}  invariant_tol={config.invariant_tol}")
+    print(f"obs sources: n={len(obs_xy_match)}  tol_arcsec={config.match_tol_arcsec}  invariant_tol={config.invariant_tol}")
     print(f"scale gate: a_min={a_min:.3e} rad/pix  a_max={a_max:.3e} rad/pix  (min={min_scale} max={max_scale} arcsec/pix)")
     print(f"cat stars used: n={len(cat_xy)}  (max_catalog_stars={config.max_catalog_stars})")
 
@@ -191,7 +200,7 @@ def solve(
         cat_tri,
         inv_tree,
         cat_tree,
-        obs_xy,
+        obs_xy_match,
         a_min,
         a_max,
         tol_rad,
@@ -209,14 +218,14 @@ def solve(
     # COARSE verification (your existing tolerance)
     # --------------------------
     coarse_score, coarse_inliers, coarse_rms_arcsec = _verify_candidate(
-        obs_xy,
+        obs_xy_match,
         cat_tree,
         scale,
         rotation,
         translation,
         tol_arcsec=float(config.match_tol_arcsec),
     )
-    coarse_frac = coarse_inliers / max(len(obs_xy), 1)
+    coarse_frac = coarse_inliers / max(len(obs_xy_match), 1)
 
     # Coarse gates (still permissive)
     COARSE_MIN_INLIERS = 8
@@ -229,7 +238,7 @@ def solve(
             {
                 "score": coarse_score,
                 "inliers": coarse_inliers,
-                "n_obs": int(len(obs_xy)),
+                "n_obs": int(len(obs_xy_match)),
                 "frac": float(coarse_frac),
                 "rms_arcsec": float(coarse_rms_arcsec),
                 "tol_arcsec": float(config.match_tol_arcsec),
@@ -254,17 +263,19 @@ def solve(
     # --------------------------
     TIGHT_TOL_ARCSEC = 1.0
     tight_score, tight_inliers, tight_rms_arcsec = _verify_candidate(
-        obs_xy,
+        obs_xy_match,
         cat_tree,
         scale,
         rotation,
         translation,
         tol_arcsec=TIGHT_TOL_ARCSEC,
     )
-    tight_frac = tight_inliers / max(len(obs_xy), 1)
+    tight_frac = tight_inliers / max(len(obs_xy_match), 1)
 
-    TIGHT_MIN_INLIERS = 8
-    TIGHT_MIN_FRAC = 0.20
+    TIGHT_MIN_INLIERS = 10
+    TIGHT_MIN_FRAC = 0.15
+    TIGHT_MIN_INLIERS_ABS_OK = 18
+    
     TIGHT_MAX_RMS_ARCSEC = 1.5
 
     if config.debug:
@@ -273,7 +284,7 @@ def solve(
             {
                 "score": tight_score,
                 "inliers": tight_inliers,
-                "n_obs": int(len(obs_xy)),
+                "n_obs": int(len(obs_xy_match)),
                 "frac": float(tight_frac),
                 "rms_arcsec": float(tight_rms_arcsec),
                 "tol_arcsec": float(TIGHT_TOL_ARCSEC),
@@ -282,21 +293,21 @@ def solve(
 
     if (
         tight_inliers < TIGHT_MIN_INLIERS
-        or tight_frac < TIGHT_MIN_FRAC
+        or (tight_frac < TIGHT_MIN_FRAC and tight_inliers < TIGHT_MIN_INLIERS_ABS_OK)
         or tight_rms_arcsec > TIGHT_MAX_RMS_ARCSEC
         or not np.isfinite(tight_score)
     ):
         # Optional: a mid-tier fallback can help if centroiding is ~1"
         MID_TOL_ARCSEC = 1.5
         mid_score, mid_inliers, mid_rms_arcsec = _verify_candidate(
-            obs_xy,
+            obs_xy_match,
             cat_tree,
             scale,
             rotation,
             translation,
             tol_arcsec=MID_TOL_ARCSEC,
         )
-        mid_frac = mid_inliers / max(len(obs_xy), 1)
+        mid_frac = mid_inliers / max(len(obs_xy_match), 1)
 
         if config.debug:
             print(
@@ -304,7 +315,7 @@ def solve(
                 {
                     "score": mid_score,
                     "inliers": mid_inliers,
-                    "n_obs": int(len(obs_xy)),
+                    "n_obs": int(len(obs_xy_match)),
                     "frac": float(mid_frac),
                     "rms_arcsec": float(mid_rms_arcsec),
                     "tol_arcsec": float(MID_TOL_ARCSEC),
@@ -362,8 +373,6 @@ def solve(
     
     wcs = wcs_from_similarity(scale, rotation, translation, ra0_deg, dec0_deg)
 
-    wcs = wcs_from_similarity(scale, rotation, translation, ra0_deg, dec0_deg)
-
     # NOTE: DO NOT rebuild the WCS with a different (ra0,dec0) unless you also
     # reproject the catalog to that new tangent point and re-fit translation.
     if config.refine_center:
@@ -399,6 +408,34 @@ def solve(
     
     return SolveResult(True, wcs, metadata)
 
+def _search_half_diag_deg(
+    width: int,
+    height: int,
+    scale_range_arcsec_per_pix: Tuple[float, float],
+    fov_guess_deg: Optional[Tuple[float, float]],
+    *,
+    pad_frac: float,
+) -> float:
+    """
+    Compute a conservative half-diagonal FOV radius (deg) to use for Stage 0 catalog search.
+
+    - Uses max scale to avoid underestimating sky footprint.
+    - Falls back to fov_guess if provided.
+    - Applies multiplicative padding (1 + pad_frac).
+    """
+    min_scale, max_scale = scale_range_arcsec_per_pix
+
+    # Prefer geometry from scale bounds (more reliable than fov_guess)
+    if max_scale > 0:
+        fov_w = (max_scale * width) / 3600.0  # deg
+        fov_h = (max_scale * height) / 3600.0
+    elif fov_guess_deg is not None:
+        fov_w, fov_h = fov_guess_deg
+    else:
+        return 0.0
+
+    half_diag = 0.5 * float(np.hypot(fov_w, fov_h))
+    return half_diag * (1.0 + float(pad_frac))
 
 def _estimate_fov(
     fits_path: Path,

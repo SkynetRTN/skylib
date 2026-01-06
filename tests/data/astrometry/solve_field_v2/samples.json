@@ -5,11 +5,64 @@
       "image": "001.fits",
       "ra_hours": 0.25,
       "dec_degs": 0.0,
-      "radius": 1.0,
       "fov": 0.2266,
       "min_scale": 0.3,
       "max_scale": 0.5,
       "wcs": "001_wcs.fits"
+    },
+    {
+      "image": "002.fits",
+      "ra_hours": 9.74,
+      "dec_degs": -31.7,
+      "fov": 0.173,
+      "min_scale": 0.4,
+      "max_scale": 0.6,
+      "wcs": "002_wcs.fits"
+    },
+    {
+      "image": "003.fits",
+      "ra_hours": 9.91,
+      "dec_degs": -25.7,
+      "fov": 0.18,
+      "min_scale": 0.5,
+      "max_scale": 0.7,
+      "wcs": "003_wcs.fits"
+    },
+    {
+      "image": "004.fits",
+      "ra_hours": 23.96,
+      "dec_degs": -32.9,
+      "fov": 0.2266,
+      "min_scale": 0.3,
+      "max_scale": 0.5,
+      "wcs": "004_wcs.fits"
+    },
+    {
+      "image": "005.fits",
+      "ra_hours": 5.78,
+      "dec_degs": 0.02,
+      "fov": 0.38,
+      "min_scale": 0.2,
+      "max_scale": 0.4,
+      "wcs": "005_wcs.fits"
+    },
+    {
+      "image": "006.fits",
+      "ra_hours": 3.559,
+      "dec_degs": -36.15,
+      "fov": 0.175,
+      "min_scale": 0.5,
+      "max_scale": 0.7,
+      "wcs": "006_wcs.fits"
+    },
+    {
+      "image": "007.fits",
+      "ra_hours": 21.50,
+      "dec_degs": 12.157,
+      "fov": 0.2266,
+      "min_scale": 0.7,
+      "max_scale": 0.9,
+      "wcs": "007_wcs.fits"
     }
   ],
   "platesolve": [],
