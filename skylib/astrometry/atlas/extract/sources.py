@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 from astropy.io import fits
@@ -27,10 +27,21 @@ def extract_sources(
     *,
     max_sources: int = 200,
     crop_fraction: float = 0.8,
-    downsample: int = 1,
-    detection_sigma: float = 5.0,
-    fwhm: float = 3.0,
+    downsample: int = 2,
+    detection_sigma: float = 0.0,
+    fwhm: float = 4.0,
     edge_margin: int = 8,
+    # ---- new: quality filters ----
+    sharplo: float = 0.2,
+    sharphi: float = 0.6,
+    roundlo: float = -0.8,
+    roundhi: float = 0.8,
+    min_snr: float = 0.0,
+    peakmax: float | None = None,          # e.g. saturation threshold, if known
+
+    # ---- new: debug overlay ----
+    debug_overlay_path: Optional[Path] = None,
+
 ) -> ExtractedSources:
     if DAOStarFinder is None:
         raise ImportError("photutils is required for source extraction")
@@ -64,13 +75,35 @@ def extract_sources(
     mean, median, std = sigma_clipped_stats(data, sigma=3.0)
     threshold = median + detection_sigma * std
 
-    finder = DAOStarFinder(fwhm=fwhm, threshold=threshold)
+    finder = DAOStarFinder(
+        fwhm=fwhm,
+        threshold=threshold,
+        sharplo=sharplo,
+        sharphi=sharphi,
+        roundlo=roundlo,
+        roundhi=roundhi,
+        peakmax=peakmax,  # if None, photutils ignores it
+    )
+
     sources = finder(data - median)
     if sources is None or len(sources) == 0:
         return ExtractedSources(np.empty((0, 2)), full_shape)
 
+    # Compute SNR using the measured flux and the background std
+    # (DAOStarFinder returns "flux" already background-subtracted-ish)
+    flux = np.asarray(sources["flux"], dtype=np.float64)
+    snr = flux / max(float(std), 1e-12)
+
+    # Filter marginal detections by SNR
+    keep = snr >= float(min_snr)
+    sources = sources[keep]
+    if len(sources) == 0:
+        return ExtractedSources(np.empty((0, 2)), full_shape)
+
+    # Sort by SNR (often better than raw flux for rejecting junk)
     sources.sort("flux")
     sources.reverse()
+
     x = np.asarray(sources["xcentroid"], dtype=np.float64)
     y = np.asarray(sources["ycentroid"], dtype=np.float64)
 
@@ -91,6 +124,27 @@ def extract_sources(
     if max_sources > 0 and len(x) > max_sources:
         x = x[:max_sources]
         y = y[:max_sources]
+
+    # --- DEBUG OVERLAY (on the cropped/downsampled image coords) ---
+    if debug_overlay_path is not None:
+        try:
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(figsize=(8, 8))
+            ax.imshow(data, origin="lower", cmap="gray", vmin=median - 2 * std, vmax=median + 10 * std)
+            ax.scatter(x, y, s=18, facecolors="none", edgecolors="lime", linewidths=0.9)
+            ax.set_title(
+                f"{fits_path.name}: detections={len(x)} "
+                f"(sigma={detection_sigma}, fwhm={fwhm}, min_snr={min_snr})"
+            )
+            ax.set_xlabel("x (cropped/downsampled pixels)")
+            ax.set_ylabel("y (cropped/downsampled pixels)")
+            fig.tight_layout()
+            fig.savefig(debug_overlay_path, dpi=160)
+            plt.close(fig)
+        except Exception:
+            # Don't fail plate solving if plotting fails
+            pass
 
     x = (x * downsample) + x0 + 1.0
     y = (y * downsample) + y0 + 1.0

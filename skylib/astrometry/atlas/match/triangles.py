@@ -34,6 +34,9 @@ class TriangleSet:
     invariants: np.ndarray
     ordered_points: np.ndarray
 
+def _cross2(a: np.ndarray, b: np.ndarray) -> float:
+    # z-component of 3D cross product for 2D vectors
+    return float(a[0] * b[1] - a[1] * b[0])
 
 def sample_triangles(
     points: np.ndarray,
@@ -90,7 +93,7 @@ def triangle_invariant_and_order(
     if min(d01, d12, d20) < min_side or max(d01, d12, d20) > max_side:
         return None, None
 
-    area = np.cross(p1 - p0, p2 - p0)
+    area = _cross2(p1 - p0, p2 - p0)
     if abs(area) < collinear_eps:
         return None, None
 
@@ -117,7 +120,7 @@ def _canonical_order(points: np.ndarray) -> np.ndarray:
         idx = (2, 0, 1)
 
     ordered = points[list(idx)]
-    cross = np.cross(ordered[1] - ordered[0], ordered[2] - ordered[0])
+    cross = _cross2(ordered[1] - ordered[0], ordered[2] - ordered[0])
     if cross < 0:
         ordered = np.array([ordered[1], ordered[0], ordered[2]])
     return ordered

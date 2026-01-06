@@ -8,14 +8,23 @@ from typing import List, Tuple
 
 import numpy as np
 
+_UCAC5_ZONE_RECORD_SIZE = 52  # u5z zone files (z001..z900)
+_MAS_TO_DEG = 1.0 / (1000.0 * 3600.0)
 
-# UCAC5 u5z layout constants
+# Define a fixed dtype for u5z:
+_UCAC5_U5Z_DTYPE = np.dtype(
+    [
+        ("srcid", "<u8"),     # Gaia source id
+        ("ra_mas", "<i4"),    # Gaia RA at epoch 2015.0, milliarcseconds
+        ("dec_mas", "<i4"),   # Gaia Dec at epoch 2015.0, milliarcseconds
+        ("rest", "u1", _UCAC5_ZONE_RECORD_SIZE - 16),
+    ]
+)
+
 _UCAC5_ZONES = 900
 _UCAC5_BINS_PER_ZONE = 1440
-
 _UCAC5_ZONE_HEIGHT_DEG = 180.0 / _UCAC5_ZONES        # 0.2 deg
 _UCAC5_BIN_WIDTH_DEG = 360.0 / _UCAC5_BINS_PER_ZONE  # 0.25 deg
-_MAS_TO_DEG = 1.0 / (1000.0 * 3600.0)
 
 
 @dataclass(frozen=True)
@@ -51,27 +60,41 @@ class Ucac5Index:
         self.u5z_dir = self.root / u5z_subdir
         self.cache_size = max(1, int(cache_size))
         self._cache: "OrderedDict[int, np.memmap]" = OrderedDict()
-        self._record_size: int | None = None
 
         if not self.u5z_dir.exists():
             raise FileNotFoundError(f"Missing UCAC5 u5z directory: {self.u5z_dir}")
 
-        self.index_unf = self.u5z_dir / "u5index.unf"
-        if not self.index_unf.exists():
-            raise FileNotFoundError(f"Missing UCAC5 index file: {self.index_unf}")
+        # Prefer ASCII index for correctness with this distribution
+        self.index_asc = self.u5z_dir / "u5index.asc"
+        if not self.index_asc.exists():
+            raise FileNotFoundError(f"Missing UCAC5 ASCII index file: {self.index_asc}")
 
-        raw = np.fromfile(self.index_unf, dtype="<i4")
-        expected = _UCAC5_ZONES * _UCAC5_BINS_PER_ZONE * 2
-        if raw.size != expected:
-            raise ValueError(
-                f"Unexpected u5index.unf size: got {raw.size} int32 values, "
-                f"expected {expected}. File: {self.index_unf}"
-            )
+        # Allocate [zone, bin, (start,count)]
+        self._idx = np.zeros((_UCAC5_ZONES, _UCAC5_BINS_PER_ZONE, 2), dtype=np.int32)
 
-        # [zone-1, bin-1, (start,count)]
-        self._idx = raw.reshape((_UCAC5_ZONES, _UCAC5_BINS_PER_ZONE, 2))
-        starts = self._idx[:, :, 0]
-        counts = self._idx[:, :, 1]
+        # Parse u5index.asc: each line has start count zone bin (and optional dec on bin 1)
+        # Example:
+        # "     0   21 406    1  -8.8"
+        # "   135141   18 406 1440"
+        with self.index_asc.open("rt", encoding="ascii", errors="strict") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                # start, count, zone, bin are always the first 4 tokens
+                if len(parts) < 4:
+                    continue
+                start = int(parts[0])
+                count = int(parts[1])
+                zone = int(parts[2])
+                bin_ = int(parts[3])
+                if 1 <= zone <= _UCAC5_ZONES and 1 <= bin_ <= _UCAC5_BINS_PER_ZONE:
+                    self._idx[zone - 1, bin_ - 1, 0] = start
+                    self._idx[zone - 1, bin_ - 1, 1] = count
+
+        starts = self._idx[:, :, 0].astype(np.int64)
+        counts = self._idx[:, :, 1].astype(np.int64)
         self._zone_record_counts = np.max(starts + counts, axis=1).astype(int)
 
     def zone_path(self, zone: int) -> Path:
@@ -84,44 +107,30 @@ class Ucac5Index:
             self._cache.move_to_end(zone)
             return self._cache[zone]
 
-        record_count = int(self._zone_record_counts[zone - 1])
-        if record_count <= 0:
-            return None
-
         path = self.zone_path(zone)
         if not path.exists():
             return None
 
         file_size = path.stat().st_size
-        if file_size <= 0 or file_size % record_count != 0:
+        if file_size <= 0 or (file_size % _UCAC5_ZONE_RECORD_SIZE) != 0:
             raise ValueError(
                 "UCAC5 zone file size is not a multiple of the record size "
-                f"({record_count} records expected): {path} ({file_size} bytes)."
+                f"({_UCAC5_ZONE_RECORD_SIZE} bytes): {path} ({file_size} bytes)."
             )
 
-        record_size = file_size // record_count
-        if record_size < 8:
+        nrec = file_size // _UCAC5_ZONE_RECORD_SIZE
+        if nrec <= 0:
+            return None
+
+        # Consistency check using ASC-derived counts (should match for correct catalogs)
+        expected_nrec = int(self._zone_record_counts[zone - 1])
+        if expected_nrec > 0 and nrec < expected_nrec:
             raise ValueError(
-                "UCAC5 zone file record size is smaller than RA/Dec fields: "
-                f"{path} ({record_size} bytes)."
+                "UCAC5 zone file appears truncated compared to u5index.asc: "
+                f"{path} has {nrec} records, index expects at least {expected_nrec}."
             )
 
-        if self._record_size is None:
-            self._record_size = record_size
-        elif self._record_size != record_size:
-            raise ValueError(
-                "UCAC5 zone files have inconsistent record sizes: "
-                f"expected {self._record_size} bytes, got {record_size} bytes in {path}."
-            )
-
-        dtype = np.dtype(
-            [
-                ("ra", "<i4"),
-                ("dec", "<i4"),
-                ("rest", "u1", record_size - 8),
-            ]
-        )
-        mm = np.memmap(path, dtype=dtype, mode="r")
+        mm = np.memmap(path, dtype=_UCAC5_U5Z_DTYPE, mode="r", shape=(nrec,))
         if mm.size == 0:
             return None
 
@@ -129,6 +138,7 @@ class Ucac5Index:
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
         return mm
+
 
     @staticmethod
     def _wrap_ra_deg(ra_deg: float) -> float:
@@ -263,8 +273,8 @@ class Ucac5Index:
             records = mm[start:stop:thin]
             if records.size == 0:
                 continue
-            ra_deg = (records["ra"].astype(np.float64) * _MAS_TO_DEG) % 360.0
-            dec_deg = records["dec"].astype(np.float64) * _MAS_TO_DEG
+            ra_deg = (records["ra_mas"].astype(np.float64) * _MAS_TO_DEG) % 360.0
+            dec_deg = (records["dec_mas"].astype(np.float64) * _MAS_TO_DEG)
             mask = (dec_deg >= dec_min_deg) & (dec_deg <= dec_max_deg)
             if ra_intervals:
                 ra_mask = np.zeros_like(mask, dtype=bool)

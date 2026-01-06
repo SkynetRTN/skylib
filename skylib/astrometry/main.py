@@ -604,6 +604,7 @@ def solve_field_v2(
             cfg = configs.get("astrometry.net")
         last_solution = candidate.solve(request, cfg)
         if last_solution.wcs is not None:
+            print(last_solution.metadata)
             return last_solution
 
     return last_solution

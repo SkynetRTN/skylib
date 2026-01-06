@@ -7,6 +7,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
+import astropy.units as u
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -49,6 +52,15 @@ def _sample_image_path(sample: dict[str, object]) -> Path:
     path = DATA_ROOT / str(image)
     if not path.exists():
         pytest.skip(f"Sample image missing: {path}")
+    return path
+
+def _sample_wcs_path(sample: dict[str, object]) -> Path:
+    wcs = sample.get("wcs")
+    if not wcs:
+        raise ValueError(f"Sample is missing the 'wcs' field")
+    path = DATA_ROOT / str(wcs)
+    if not path.exists():
+        pytest.skip(f"Sample WCS file missing: {path}")
     return path
 
 
@@ -202,11 +214,72 @@ def test_solve_field_v2_atlas_samples() -> None:
         pytest.skip("UCAC5 root path not configured or missing")
 
     samples = _get_samples("atlas")
-    config = AtlasConfig(catalog="ucac5",catalog_roots={"ucac4": Path(ucac4_root), "ucac5": Path(ucac5_root)})
+    config = AtlasConfig(catalog="ucac5",catalog_roots={"ucac4": Path(ucac4_root), "ucac5": Path(ucac5_root)}, debug=True)
 
     for sample in samples:
         image_path = _sample_image_path(sample)
+        wcs_path = _sample_wcs_path(sample)
         request = _solve_request_from_sample(sample, image_path)
         solution = solve_field_v2(request, backend="atlas", configs={"atlas": config})
         assert solution.backend == "atlas"
         assert solution.wcs is not None, f"Atlas failed to solve {image_path}"
+        
+        print(f"Solved {image_path.name}: WCS = {solution.wcs}")
+        assert_wcs_matches_reference(
+            test_wcs=solution.wcs,
+            reference_wcs_fits_path=wcs_path,
+            width=1000,
+            height=1000,
+        )
+
+
+def assert_wcs_matches_reference(
+    test_wcs: WCS,
+    reference_wcs_fits_path,
+    *,
+    width: int,
+    height: int,
+    n_grid: int = 7,                 # 7x7 grid across image
+    max_sep_arcsec: float = 1.0,     # tolerance
+    drop_nans: bool = True,
+) -> None:
+    """
+    Assert that test_wcs and reference WCS from a FITS file agree to within
+    max_sep_arcsec across a pixel grid spanning the image.
+    """
+    with fits.open(reference_wcs_fits_path) as hdul:
+        ref_wcs = WCS(hdul[0].header)
+
+    # Grid of pixel coordinates (0-based, since Astropy WCS uses 0-based in pixel_to_world_values)
+    xs = np.linspace(0, width - 1, n_grid, dtype=float)
+    ys = np.linspace(0, height - 1, n_grid, dtype=float)
+    xx, yy = np.meshgrid(xs, ys)
+    px = xx.ravel()
+    py = yy.ravel()
+
+    # Convert pixels -> world for both WCS
+    ra1, dec1 = test_wcs.pixel_to_world_values(px, py)
+    ra2, dec2 = ref_wcs.pixel_to_world_values(px, py)
+
+    c1 = SkyCoord(ra=ra1 * u.deg, dec=dec1 * u.deg, frame="icrs")
+    c2 = SkyCoord(ra=ra2 * u.deg, dec=dec2 * u.deg, frame="icrs")
+
+    sep = c1.separation(c2).to(u.arcsec).value
+
+    if drop_nans:
+        sep = sep[np.isfinite(sep)]
+
+    assert sep.size > 0, "No finite comparison points for WCS match check"
+
+    worst = float(np.nanmax(sep))
+    assert worst <= max_sep_arcsec, (
+        f"WCS mismatch: worst separation {worst:.3f} arcsec "
+        f"(tolerance {max_sep_arcsec:.3f} arcsec)"
+    )
+        
+
+if __name__ == "__main__":
+    # test_solve_field_v2_astap_samples()
+    # test_solve_field_v2_platesolve_samples(tmp_path=Path(tempfile.gettempdir()))
+    # test_solve_field_v2_astrometry_net_samples()
+    test_solve_field_v2_atlas_samples()

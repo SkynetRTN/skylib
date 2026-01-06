@@ -3,10 +3,13 @@
   "atlas": [
     {
       "image": "001.fits",
-      "ra_hours": 0.0,
+      "ra_hours": 0.25,
       "dec_degs": 0.0,
-      "radius": 2.0,
-      "fov": 13.6
+      "radius": 1.0,
+      "fov": 0.2266,
+      "min_scale": 0.3,
+      "max_scale": 0.5,
+      "wcs": "001_wcs.fits"
     }
   ],
   "platesolve": [],
