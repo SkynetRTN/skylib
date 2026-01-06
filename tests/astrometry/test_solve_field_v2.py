@@ -14,13 +14,9 @@ import pytest
 from astropy.io import fits
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 
-from skylib.astrometry.main import (
-    AtlasConfig,
-    AstrometryNetBackend,
-    AstrometryNetConfig,
-    SolveRequest,
-    solve_field_v2,
-)
+from skylib.astrometry.astrometry_net import AstrometryNetBackend, AstrometryNetConfig
+from skylib.astrometry.atlas import AtlasBackend, AtlasConfig
+from skylib.astrometry.types import SolveRequest
 from skylib.extraction.main import extract_sources
 
 DATA_ROOT = Path(__file__).resolve().parents[1] / "data" / "astrometry" / "solve_field_v2"
@@ -116,7 +112,7 @@ def _maybe_save_sources(image_path: Path, data: np.ndarray, xy: np.ndarray, *, l
     plt.close()
 
 
-def test_solve_field_v2_astrometry_net_samples() -> None:
+def test_astrometry_net_backend_samples() -> None:
     backend = AstrometryNetBackend()
     if not backend.is_available():
         pytest.skip("Astrometry.net engine is not available")
@@ -153,18 +149,19 @@ def test_solve_field_v2_astrometry_net_samples() -> None:
             retry_lost=request.retry_lost,
             callback=request.callback,
         )
-        solution = solve_field_v2(request, backend="an", configs={"an": config})
+        solution = backend.solve(request, config)
         assert solution.backend == "an"
         assert solution.wcs is not None, f"Astrometry.net failed to solve {image_path}"
 
 
-def test_solve_field_v2_atlas_samples() -> None:
+def test_atlas_backend_samples() -> None:
     ucac5_root = os.getenv("SKYLIB_UCAC5_ROOT")
     if not ucac5_root or not Path(ucac5_root).exists():
         pytest.skip("UCAC5 root path not configured or missing")
 
     samples = _get_samples("atlas")
-    config = AtlasConfig(catalog="ucac5",catalog_roots={"ucac5": Path(ucac5_root)}, debug=True)
+    config = AtlasConfig(catalog="ucac5", catalog_roots={"ucac5": Path(ucac5_root)}, debug=True)
+    backend = AtlasBackend()
 
     for sample in samples:
         image_path = _sample_image_path(sample)
@@ -173,7 +170,7 @@ def test_solve_field_v2_atlas_samples() -> None:
 
         wcs_path = _sample_wcs_path(sample)
         request = _solve_request_from_sample(sample, image_path)
-        solution = solve_field_v2(request, backend="atlas", configs={"atlas": config})
+        solution = backend.solve(request, config)
         assert solution.backend == "atlas"
         assert solution.wcs is not None, f"Atlas failed to solve {image_path}"
         
@@ -232,5 +229,5 @@ def assert_wcs_matches_reference(
         
 
 if __name__ == "__main__":
-    # test_solve_field_v2_astrometry_net_samples()
-    test_solve_field_v2_atlas_samples()
+    # test_astrometry_net_backend_samples()
+    test_atlas_backend_samples()
