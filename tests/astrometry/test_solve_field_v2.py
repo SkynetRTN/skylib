@@ -14,7 +14,7 @@ import pytest
 from astropy.io import fits
 from astropy.visualization import AsinhStretch, ImageNormalize, PercentileInterval
 
-from skylib.astrometry.astrometry_net import AstrometryNetBackend, AstrometryNetConfig
+from skylib.astrometry.anet import AstrometryNetBackend, AstrometryNetConfig
 from skylib.astrometry.atlas import AtlasBackend, AtlasConfig
 from skylib.astrometry.types import SolveRequest
 from skylib.extraction.main import extract_sources
