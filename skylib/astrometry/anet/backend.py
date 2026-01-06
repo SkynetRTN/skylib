@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import os
 from typing import Optional
 
 import numpy as np
@@ -25,7 +26,7 @@ class AstrometryNetBackend:
     def solve(
         self,
         request: SolveRequest,
-        config: Optional[AstrometryNetConfig],
+        config: AstrometryNetConfig,
     ) -> SolveSolution:
         if request.xy is None:
             raise ValueError("xy must be provided")
@@ -35,9 +36,15 @@ class AstrometryNetBackend:
 
         engine = config.engine
         if engine is None:
-            if config.index_path is None:
+            index_path = config.index_path
+
+            if index_path is None:
+                index_path = os.getenv("SKYLIB_ANET_INDEX_ROOT")
+            
+            if index_path is None:
                 raise ValueError("index_path or engine must be provided")
-            engine = AstrometryNetSolver(config.index_path)
+            
+            engine = AstrometryNetSolver(index_path)
 
         solver = engine.solver
         ra = float(request.ra_hours) * 15
