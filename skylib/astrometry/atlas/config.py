@@ -17,7 +17,7 @@ class AtlasConfig:
     n_tri_obs: int = 15000
     n_tri_cat: int = 50000
     invariant_tol: float = 0.006
-    match_tol_arcsec: float = 3.0
+    match_tol_arcsec: float = 5.0
     refine_center: bool = True
     thin: int = 1
     debug: bool = False

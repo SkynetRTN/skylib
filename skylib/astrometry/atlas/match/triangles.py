@@ -120,9 +120,6 @@ def _canonical_order(points: np.ndarray) -> np.ndarray:
         idx = (2, 0, 1)
 
     ordered = points[list(idx)]
-    cross = _cross2(ordered[1] - ordered[0], ordered[2] - ordered[0])
-    if cross < 0:
-        ordered = np.array([ordered[1], ordered[0], ordered[2]])
     return ordered
 
 

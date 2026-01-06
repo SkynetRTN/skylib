@@ -24,6 +24,12 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover
     from skylib.astrometry.atlas.match.triangles import cKDTree
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+
 ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
 LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +38,17 @@ class SolveResult:
     success: bool
     wcs: Optional[WCS]
     metadata: dict
+
+def _effective_catalog_in_fov(cat_xy, scale, rotation, translation, width, height, margin_pix=20.0):
+    obs_pred = ((cat_xy - translation) @ rotation) / max(scale, 1e-30)
+
+    x = obs_pred[:, 0]
+    y = obs_pred[:, 1]
+    inside = (
+        (x >= -margin_pix) & (x < width + margin_pix) &
+        (y >= -margin_pix) & (y < height + margin_pix)
+    )
+    return int(np.count_nonzero(inside))
 
 def _verify_candidate(
     obs_xy: np.ndarray,
@@ -64,6 +81,8 @@ def solve(
 ) -> SolveResult:
     start = time.perf_counter()
 
+    LOGGER.info("Starting solve for image: %s", fits_path)
+
     debug_overlay_path: Optional[Path] = None
     if config.debug:
         debug_overlay_path = fits_path.with_suffix(".png").with_name(fits_path.stem + "_sources.png")
@@ -83,29 +102,7 @@ def solve(
     obs_xy = sources.xy
     height, width = sources.shape
 
-    # ---- Dense-field handling: match/verify only on brightest sources ----
-    # In globular clusters / crowded fields, many detections are real but *not* in the catalog
-    # (too faint, blended, missing from UCAC5). Using all sources makes "inlier fraction"
-    # meaningless and increases false local correspondences.
-    max_match_sources = int(getattr(config, "max_match_sources", 180))
-    if obs_xy.shape[0] > max_match_sources and hasattr(sources, "flux") and sources.flux.size == obs_xy.shape[0]:
-        order = np.argsort(sources.flux)[::-1]  # brightest first
-        keep = order[:max_match_sources]
-        obs_xy_match = obs_xy[keep]
-    else:
-        obs_xy_match = obs_xy
-
-    if config.debug:
-        LOGGER.debug(
-            "obs sources (raw): n=%s ; using for match/verify: n=%s",
-            len(obs_xy),
-            len(obs_xy_match),
-        )
-
-
-    if obs_xy_match.size == 0:
-        return SolveResult(False, None, {"reason": "no_sources"})
-
+    
     if fov_guess_deg is None:
         fov_guess_deg = _estimate_fov(fits_path, width, height, scale_range_arcsec_per_pix)
     if fov_guess_deg is None:
@@ -139,7 +136,7 @@ def solve(
 
     LOGGER.info(
         "searching: %s",
-        (ra0_deg - ra_half, ra0_deg + ra_half, dec0_deg - dec_half, dec0_deg + dec_half),
+        (ra0_deg, dec0_deg, ra_half*2*60, dec_half*2*60),
     )
 
     catalog_name, catalog_root = config.resolve_catalog()
@@ -164,6 +161,28 @@ def solve(
 
     if len(cat_xy) < 3:
         return SolveResult(False, None, {"reason": "insufficient_catalog"})
+    
+
+    # ---- Dense/Sparse-field handling: match/verify only on brightest sources ----
+    max_match_sources = int(getattr(config, "max_match_sources", 180))
+    if obs_xy.shape[0] > max_match_sources and hasattr(sources, "flux") and sources.flux.size == obs_xy.shape[0]:
+        order = np.argsort(sources.flux)[::-1]  # brightest first
+        keep = order[:max_match_sources]
+        obs_xy_match = obs_xy[keep]
+    else:
+        obs_xy_match = obs_xy
+
+    if config.debug:
+        LOGGER.info(
+            "obs sources (raw): n=%s ; using for match/verify: n=%s",
+            len(obs_xy),
+            len(obs_xy_match),
+        )
+
+
+    if obs_xy_match.size == 0:
+        return SolveResult(False, None, {"reason": "no_sources"})
+
 
     rng = np.random.default_rng(0)
     min_scale, max_scale = scale_range_arcsec_per_pix
@@ -174,8 +193,6 @@ def solve(
     max_side_pix = 0.6 * max(width, height)
     min_side_rad = min_side_pix * a_min
     max_side_rad = max_side_pix * a_max
-    min_side_pix = 30
-    max_side_pix = 2000
 
     obs_tri = sample_triangles(
         obs_xy_match,
@@ -253,15 +270,18 @@ def solve(
         translation,
         tol_arcsec=float(config.match_tol_arcsec),
     )
-    coarse_frac = coarse_inliers / max(len(obs_xy_match), 1)
+
+    n_cat_eff = _effective_catalog_in_fov(cat_xy, scale, rotation, translation, width, height, margin_pix=20)
+    denom = max(min(len(obs_xy_match), n_cat_eff), 1)
+    coarse_frac = coarse_inliers / denom
 
     # Coarse gates (still permissive)
     COARSE_MIN_INLIERS = 8
-    COARSE_MIN_FRAC = 0.15
+    COARSE_MIN_FRAC = 0.0   # sparse-field friendly
     COARSE_MAX_RMS_ARCSEC = 2.5
 
     if config.debug:
-        LOGGER.debug(
+        LOGGER.info(
             "verify coarse: %s",
             {
                 "score": coarse_score,
@@ -280,7 +300,7 @@ def solve(
         or not np.isfinite(coarse_score)
     ):
         if config.debug:
-            LOGGER.debug(
+            LOGGER.info(
                 "Rejecting candidate at coarse verify: inliers=%s rms=%.3f arcsec",
                 coarse_inliers,
                 coarse_rms_arcsec,
@@ -299,7 +319,7 @@ def solve(
         translation,
         tol_arcsec=TIGHT_TOL_ARCSEC,
     )
-    tight_frac = tight_inliers / max(len(obs_xy_match), 1)
+    tight_frac = tight_inliers / denom
 
     TIGHT_MIN_INLIERS = 10
     TIGHT_MIN_FRAC = 0.15
@@ -308,7 +328,7 @@ def solve(
     TIGHT_MAX_RMS_ARCSEC = 1.5
 
     if config.debug:
-        LOGGER.debug(
+        LOGGER.info(
             "verify tight: %s",
             {
                 "score": tight_score,
@@ -336,10 +356,10 @@ def solve(
             translation,
             tol_arcsec=MID_TOL_ARCSEC,
         )
-        mid_frac = mid_inliers / max(len(obs_xy_match), 1)
+        mid_frac = mid_inliers / denom
 
         if config.debug:
-            LOGGER.debug(
+            LOGGER.info(
                 "verify mid: %s",
                 {
                     "score": mid_score,
@@ -362,7 +382,7 @@ def solve(
             or not np.isfinite(mid_score)
         ):
             if config.debug:
-                LOGGER.debug(
+                LOGGER.info(
                     "Rejecting candidate at tight verify: inliers=%s rms=%.3f arcsec",
                     tight_inliers,
                     tight_rms_arcsec,
@@ -412,7 +432,7 @@ def solve(
         center_ra, center_dec = wcs.pixel_to_world_values(cx0, cy0)
 
         if config.debug:
-            LOGGER.debug(
+            LOGGER.info(
                 "Refined center (from WCS @ image center): RA=%.6f DEC=%.6f",
                 center_ra,
                 center_dec,
@@ -593,8 +613,31 @@ def _match_triangles(
         n_candidate_pairs += len(candidate_idx)
 
         for idx in candidate_idx:
-            cat_order = cat_tri.ordered_points[idx]
-            scale, rotation, translation = _fit_similarity(obs_order, cat_order)
+            cat_order0 = cat_tri.ordered_points[idx]
+
+            best_local_score = float("-inf")
+            best_local_tuple = None
+
+            # Try all vertex correspondences
+            for perm in ((0,1,2),(0,2,1),(1,0,2),(1,2,0),(2,0,1),(2,1,0)):
+                cat_order = cat_order0[list(perm)]
+                scale, rotation, translation = _fit_similarity(obs_order, cat_order)
+
+                if scale < a_min or scale > a_max:
+                    continue
+
+                score, inliers, rms = _score_candidate(obs_xy, cat_tree, scale, rotation, translation, tol_rad)
+
+                if score > best_local_score:
+                    best_local_score = float(score)
+                    best_local_tuple = (scale, rotation, translation, inliers, rms)
+
+            # Use best permutation for this candidate
+            if best_local_tuple is None:
+                n_scale_reject += 1  # or track separately
+                continue
+
+            scale, rotation, translation, inliers, rms = best_local_tuple
 
             if scale < a_min or scale > a_max:
                 n_scale_reject += 1
@@ -632,7 +675,7 @@ def _match_triangles(
                 best_updates += 1
                 if debug:
                     # Print enough to identify if this is "real-ish"
-                    LOGGER.debug(
+                    LOGGER.info(
                         "new best: %s",
                         {
                             "score": best_score,
@@ -643,7 +686,7 @@ def _match_triangles(
                     )
 
     if debug:
-        LOGGER.debug(
+        LOGGER.info(
             "match_triangles summary: %s",
             {
                 "obs_triangles": int(len(obs_tri.triangles)),
@@ -670,9 +713,9 @@ def _match_triangles(
         )
         if topk:
             topk.sort(key=lambda t: t[0], reverse=True)
-            LOGGER.debug("top candidates (score, inliers, rms_arcsec, scale_arcsec_per_pix):")
+            LOGGER.info("top candidates (score, inliers, rms_arcsec, scale_arcsec_per_pix):")
             for s, inl, rms, sc in topk[:10]:
-                LOGGER.debug(
+                LOGGER.info(
                     "  %s",
                     (
                         s,
@@ -758,11 +801,7 @@ def _fit_similarity(src: np.ndarray, dst: np.ndarray):
 
     cov = dst_c.T @ src_c
     u, s, vt = np.linalg.svd(cov)
-    rotation = u @ vt
-    if np.linalg.det(rotation) < 0:
-        u[:, -1] *= -1
-        rotation = u @ vt
-
+    rotation = u @ vt          # keep as-is, even if det < 0
     var = np.sum(src_c ** 2)
     scale = np.sum(s) / var
     translation = dst_mean - scale * (rotation @ src_mean)

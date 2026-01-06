@@ -16,8 +16,8 @@ class SolveRequest:
     flux: Optional[np.ndarray] = None
     width: Optional[int] = None
     height: Optional[int] = None
-    ra_hours: float = 0.0
-    dec_degs: float = 0.0
+    ra_hours: Optional[float] = 0.0
+    dec_degs: Optional[float] = 0.0
     radius: float = 180.0
     min_scale: float = 0.1
     max_scale: float = 10.0
