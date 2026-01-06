@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import ctypes
-import importlib
-import importlib.util
-import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Protocol, Sequence, Union
@@ -28,8 +24,6 @@ except Exception:  # pragma: no cover - missing optional dependency
 
 BackendConfig = Union[
     "AstrometryNetConfig",
-    "AstapConfig",
-    "PlateSolveConfig",
     "AtlasConfig",
 ]
 
@@ -80,27 +74,6 @@ class Backend(Protocol):
 class AstrometryNetConfig:
     index_path: Optional[Union[str, Sequence[str]]] = None
     engine: Optional["AstrometryNetSolver"] = None
-
-
-@dataclass
-class AstapConfig:
-    cmd: str = "astap_cli"
-    catalog: Optional[str] = "C:/astap"
-
-
-@dataclass
-class PlateSolveConfig:
-    cmd: str = "platesolve3.80"
-    args: Sequence[str] = (
-        "{image_path}",
-        "{ra_rad}",
-        "{dec_rad}",
-        "{x_size_rad}",
-        "{y_size_rad}",
-    )
-    output_suffix: str = ".txt"
-    output_path: Optional[Path] = None
-    cwd: Optional[Path] = None
 
 
 class AstrometryNetSolver:
@@ -368,115 +341,6 @@ class AstrometryNetBackend:
             an_engine.solver_clear_indexes(solver)
 
 
-class AstapBackend:
-    name = "astap"
-
-    def is_available(self) -> bool:
-        return True
-
-    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
-        if not isinstance(config, AstapConfig):
-            raise ValueError("ASTAP config is required")
-        if request.image_path is None:
-            raise ValueError("image_path must be provided for ASTAP backend")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "solved"
-
-            cmdline = [config.cmd, "-f", str(request.image_path), "-o", str(output)]
-            if request.ra_hours is not None:
-                cmdline.extend(["-ra", str(float(request.ra_hours))])
-            if request.dec_degs is not None:
-                cmdline.extend(["-spd", str(float(request.dec_degs + 90.0))])
-            if request.radius is not None:
-                cmdline.extend(["-r", str(float(request.radius))])
-            if request.fov is not None:
-                cmdline.extend(["-fov", str(float(request.fov))])
-            if config.catalog:
-                cmdline.extend(["-d", config.catalog])
-            if request.downsample is not None:
-                cmdline.extend(["-z", str(int(request.downsample))])
-
-            subprocess.run(cmdline, check=False)
-
-            sol = SolveSolution(backend=self.name)
-            wcs_path = output.with_suffix(".wcs")
-            sol.wcs = _load_wcs(wcs_path)
-            return sol
-
-
-class PlateSolveBackend:
-    name = "platesolve"
-
-    def is_available(self) -> bool:
-        return True
-
-    def solve(self, request: SolveRequest, config: Optional[BackendConfig]) -> SolveSolution:
-        if not isinstance(config, PlateSolveConfig):
-            raise ValueError("PlateSolve config is required")
-        if request.image_path is None:
-            raise ValueError("image_path must be provided for PlateSolve backend")
-
-        output_path = config.output_path
-        if output_path is None:
-            output_path = request.image_path.with_stem(request.image_path.stem + "_PS3") \
-                                            .with_suffix(config.output_suffix)
-
-        ra_rad = np.deg2rad(float(request.ra_hours) * 15.0)
-        dec_rad = np.deg2rad(float(request.dec_degs))
-        if request.fov is not None:
-            x_size = float(request.fov)
-        elif request.radius is not None:
-            x_size = float(request.radius) * 2.0
-        else:
-            x_size = 0.0
-        y_size = x_size
-        if request.width and request.height and x_size:
-            y_size = x_size * (float(request.height) / float(request.width))
-        x_size_rad = np.deg2rad(x_size)
-        y_size_rad = np.deg2rad(y_size)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            temp_image_path = _inject_platesolve_wcs(
-                request.image_path,
-                Path(tmp),
-                request,
-                x_size=x_size,
-                y_size=y_size,
-            )
-
-            context = {
-                "cmd": config.cmd,
-                "image_path": temp_image_path,
-                "ra_hours": request.ra_hours,
-                "dec_degs": request.dec_degs,
-                "radius": request.radius,
-                "fov": request.fov,
-                "width": request.width,
-                "height": request.height,
-                "output_path": output_path,
-                "downsample": request.downsample,
-                "ra_rad": ra_rad,
-                "dec_rad": dec_rad,
-                "x_size_rad": x_size_rad,
-                "y_size_rad": y_size_rad,
-            }
-            cmdline = [config.cmd]
-            for arg in config.args:
-                formatted = arg.format_map(context)
-                if formatted:
-                    cmdline.append(formatted)
-
-            subprocess.run(cmdline, check=False, cwd=str(config.cwd) if config.cwd else None)
-
-        sol = SolveSolution(backend=self.name)
-        if output_path.suffix.lower() == ".txt":
-            sol.wcs, sol.metadata = _load_platesolve_solution(output_path)
-        else:
-            sol.wcs = _load_wcs(output_path)
-        return sol
-
-
 class AtlasBackend:
     name = "atlas"
 
@@ -508,58 +372,6 @@ class AtlasBackend:
         return sol
 
 
-def _inject_platesolve_wcs(
-    image_path: Path,
-    tmp_dir: Path,
-    request: SolveRequest,
-    *,
-    x_size: float,
-    y_size: float,
-) -> Path:
-    if x_size <= 0 or y_size <= 0:
-        return image_path
-
-    try:
-        with fits.open(image_path) as hdul:
-            hdu = hdul[0]
-            data = hdu.data
-            header = hdu.header.copy()
-    except Exception:
-        return image_path
-
-    if data is None or data.ndim < 2:
-        return image_path
-
-    width = request.width or data.shape[1]
-    height = request.height or data.shape[0]
-    if width <= 0 or height <= 0:
-        return image_path
-
-    ra_deg = float(request.ra_hours) * 15.0
-    dec_deg = float(request.dec_degs)
-    scale_x = x_size / float(width)
-    scale_y = y_size / float(height)
-    crpix1 = (float(width) + 1.0) / 2.0
-    crpix2 = (float(height) + 1.0) / 2.0
-
-    header["WCSAXES"] = 2
-    header["CTYPE1"] = "RA---TAN"
-    header["CTYPE2"] = "DEC--TAN"
-    header["CUNIT1"] = "deg"
-    header["CUNIT2"] = "deg"
-    header["CRVAL1"] = ra_deg
-    header["CRVAL2"] = dec_deg
-    header["CRPIX1"] = crpix1
-    header["CRPIX2"] = crpix2
-    header["CDELT1"] = -scale_x
-    header["CDELT2"] = scale_y
-    header["EQUINOX"] = 2000.0
-
-    output_path = tmp_dir / f"{image_path.stem}_platesolve_wcs.fits"
-    fits.PrimaryHDU(data=data, header=header).writeto(output_path, overwrite=True)
-    return output_path
-
-
 def solve_field_v2(
     request: SolveRequest,
     backend: Optional[Union[str, Backend]] = None,
@@ -569,8 +381,6 @@ def solve_field_v2(
     registry = {
         "an": AstrometryNetBackend(),
         "astrometry.net": AstrometryNetBackend(),
-        "astap": AstapBackend(),
-        "platesolve": PlateSolveBackend(),
         "atlas": AtlasBackend(),
     }
 
@@ -592,7 +402,7 @@ def solve_field_v2(
     elif preferred_backends is not None:
         selected = [resolve_backend(item) for item in preferred_backends]
     else:
-        default = ["an", "astap", "platesolve"] if an_engine is not None else ["astap", "platesolve"]
+        default = ["an", "atlas"] if an_engine is not None else ["atlas"]
         selected = [resolve_backend(item) for item in default]
 
     last_solution = SolveSolution()
@@ -700,8 +510,6 @@ def solve_field(
     retry_lost=True,
     callback=None,
     backend=None,
-    astap_cmd="astap_cli",
-    astap_catalog="C:/astap",
     image_path: Path = None,
     downsample: Optional[int] = None,
     ucac4_root: Optional[Path] = None,
@@ -712,7 +520,7 @@ def solve_field(
     """Obtain astrometric solution given XY coordinates of field stars."""
 
     if backend is None:
-        backend = "an" if an_engine is not None else "astap"
+        backend = "an" if an_engine is not None else "atlas"
     elif backend in {"an", "astrometry.net"} and an_engine is None:
         raise ValueError("Astrometry.net backend is not available on this system")
 
@@ -742,8 +550,6 @@ def solve_field(
         if engine is None:
             raise ValueError("engine must be provided for Astrometry.net backend")
         configs["an"] = AstrometryNetConfig(engine=engine)
-    elif backend == "astap":
-        configs["astap"] = AstapConfig(cmd=astap_cmd, catalog=astap_catalog)
     elif backend == "atlas":
         configs["atlas"] = AtlasConfig(
             ucac4_root=ucac4_root,
@@ -820,86 +626,6 @@ def _load_wcs(path: Path) -> Optional[WCS]:
             return None
 
 
-def _load_platesolve_solution(path: Path) -> tuple[Optional[WCS], dict]:
-    if not path.exists():
-        return None, {}
-
-    lines = [line.strip() for line in path.read_text().splitlines() if line.strip()]
-    if not lines:
-        return None, {}
-
-    metadata: dict = {}
-    success_tokens = lines[0].lower().replace(",", " ").split()
-    success = any(token == "true" for token in success_tokens)
-    metadata["success"] = success
-    if not success:
-        return None, metadata
-
-    def parse_floats(line: str) -> list[float]:
-        cleaned = line.replace(",", " ")
-        values = []
-        for token in cleaned.split():
-            try:
-                values.append(float(token))
-            except ValueError:
-                continue
-        return values
-
-    ra_dec = parse_floats(lines[1]) if len(lines) > 1 else []
-    if len(ra_dec) >= 2:
-        ra_rad, dec_rad = ra_dec[0], ra_dec[1]
-    else:
-        return None, metadata
-    metadata["ra_rad"] = ra_rad
-    metadata["dec_rad"] = dec_rad
-
-    scale_rot = parse_floats(lines[2]) if len(lines) > 2 else []
-    if len(scale_rot) >= 2:
-        imscale, rot_deg = scale_rot[0], scale_rot[1]
-        metadata["imscale"] = imscale
-        metadata["rotation_deg"] = rot_deg
-    else:
-        return None, metadata
-
-    if len(lines) > 3:
-        metadata["match_method"] = lines[3]
-
-    if len(lines) > 4:
-        coeffs = parse_floats(lines[4])
-        if len(coeffs) >= 8:
-            metadata["transform_coeffs"] = coeffs[:8]
-
-    if len(lines) > 5:
-        u0v0 = parse_floats(lines[5])
-        if len(u0v0) >= 2:
-            u0, v0 = u0v0[0], u0v0[1]
-        else:
-            u0, v0 = 0.0, 0.0
-    else:
-        u0, v0 = 0.0, 0.0
-    metadata["u0"] = u0
-    metadata["v0"] = v0
-
-    if len(lines) > 6:
-        extra = parse_floats(lines[6])
-        if extra:
-            metadata["extra"] = extra
-
-    wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ("RA---TAN", "DEC--TAN")
-    wcs.wcs.crval = [np.rad2deg(ra_rad), np.rad2deg(dec_rad)]
-    wcs.wcs.crpix = [u0, v0]
-    scale_deg = (1.0 / imscale) * (180.0 / np.pi)
-    theta = np.deg2rad(rot_deg)
-    wcs.wcs.cd = scale_deg * np.array(
-        [
-            [-np.cos(theta), np.sin(theta)],
-            [np.sin(theta), np.cos(theta)],
-        ]
-    )
-    return wcs, metadata
-
-
 def array_from_swig(data, shape, dtype=np.float64):
     a = np.empty(shape, dtype)
     ctypes.memmove(a.ctypes, int(data), a.nbytes)
@@ -907,15 +633,11 @@ def array_from_swig(data, shape, dtype=np.float64):
 
 
 __all__ = [
-    "AstapBackend",
-    "AstapConfig",
     "AstrometryNetBackend",
     "AstrometryNetConfig",
     "AstrometryNetSolver",
     "Backend",
     "AtlasBackend",
-    "PlateSolveBackend",
-    "PlateSolveConfig",
     "AtlasConfig",
     "SolveRequest",
     "SolveSolution",

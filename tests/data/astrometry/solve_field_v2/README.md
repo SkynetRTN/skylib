@@ -2,9 +2,8 @@
 
 Add sample FITS images under the backend-specific directories:
 
-- `astap/`
-- `platesolve/`
 - `an/` (astrometry.net)
+- `atlas/`
 
 Update `samples.json` with the parameters needed to solve each image. Each entry
 supports the following keys (all optional unless noted otherwise):
@@ -22,24 +21,6 @@ Example:
 
 ```json
 {
-  "astap": [
-    {
-      "image": "m31_astap.fits",
-      "ra_hours": 0.712,
-      "dec_degs": 41.269,
-      "radius": 5.0,
-      "fov": 2.0
-    }
-  ],
-  "platesolve": [
-    {
-      "image": "m31_ps3.fits",
-      "ra_hours": 0.712,
-      "dec_degs": 41.269,
-      "radius": 5.0,
-      "fov": 2.0
-    }
-  ],
   "an": [
     {
       "image": "m31_an.fits",
@@ -50,14 +31,19 @@ Example:
       "max_scale": 2.0,
       "max_sources": 2000
     }
+  ],
+  "atlas": [
+    {
+      "image": "m31_atlas.fits",
+      "ra_hours": 0.712,
+      "dec_degs": 41.269,
+      "radius": 5.0,
+      "fov": 2.0
+    }
   ]
 }
 ```
 
 Environment variables used by the tests:
 
-- `SKYLIB_ASTAP_CMD`: path to `astap_cli` (defaults to `astap_cli`).
-- `SKYLIB_ASTAP_CATALOG`: path to ASTAP star catalog directory (required).
-- `SKYLIB_PLATESOLVE_CMD`: path to PlateSolve executable.
-- `SKYLIB_PLATESOLVE_CWD`: optional working directory for PlateSolve.
 - `SKYLIB_ASTROMETRYNET_INDEX_PATH`: one or more index paths (separated by your OS path separator).
