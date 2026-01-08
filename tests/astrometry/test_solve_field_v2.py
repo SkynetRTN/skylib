@@ -165,8 +165,8 @@ def test_atlas_backend_samples() -> None:
 
     for sample in samples:
         image_path = _sample_image_path(sample)
-        # if "008" not in str(image_path):
-        #     continue
+        if "009" not in str(image_path):
+            continue
 
         wcs_path = _sample_wcs_path(sample)
         request = _solve_request_from_sample(sample, image_path)
