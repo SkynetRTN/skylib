@@ -1350,19 +1350,6 @@ files = [
 ]
 
 [[package]]
-name = "tbb"
-version = "2021.10.0"
-summary = "Intel® oneAPI Threading Building Blocks (oneTBB)"
-groups = ["default"]
-files = [
-    {file = "tbb-2021.10.0-py2.py3-none-macosx_10_15_x86_64.macosx_11_0_x86_64.whl", hash = "sha256:5049f3be64664897f33ac1474a1bb1cfa45274cd8f4541e91fee4eda5c4165b5"},
-    {file = "tbb-2021.10.0-py2.py3-none-manylinux1_i686.whl", hash = "sha256:46205d559a2bfd877e9ea9a674fb3efb5d6024bd5dc10ace78c16d9d2db5d921"},
-    {file = "tbb-2021.10.0-py2.py3-none-manylinux1_x86_64.whl", hash = "sha256:a201aa14e098f7f6c8e45e393382007d01552f92797283b46d550068717cfb8c"},
-    {file = "tbb-2021.10.0-py3-none-win32.whl", hash = "sha256:64815eb09c0720e9d59f9ce74b0fde23424cddcdd604941a122eba846a5eaa5f"},
-    {file = "tbb-2021.10.0-py3-none-win_amd64.whl", hash = "sha256:787745460f79dc92883ef237330db20f57382a3e9bcb088a1fa49abd6a96b1d6"},
-]
-
-[[package]]
 name = "typing-extensions"
 version = "4.13.1"
 requires_python = ">=3.8"
