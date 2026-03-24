@@ -276,6 +276,7 @@ def _do_combine(input_data: list[callable],
                 min_keep: int = 2,
                 lo: bool | int | float | None = None,
                 hi: bool | int | float | None = None,
+                nu: bool | int | float | None = None,
                 propagate_mask: bool = True,
                 equalize_additive: bool = False,
                 equalize_order: int = 1,
@@ -412,7 +413,7 @@ def _do_combine(input_data: list[callable],
                 # Non-native byte order is not supported by Numba
                 datacube = datacube.astype(datacube.dtype.newbyteorder())
             chauvenet(
-                datacube.data, datacube.mask, min_vals=min_keep,
+                datacube.data, datacube.mask, nu=nu, min_vals=min_keep,
                 mean_type=1 if rejection == 'rcr' else 0,
                 sigma_type=1 if rejection == 'rcr' else 0,
                 clip_lo=lo, clip_hi=hi)
@@ -582,6 +583,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
             min_keep: int = 2,
             lo: bool | int | float | None = None,
             hi: bool | int | float | None = None,
+            nu: bool | int | float | None = None,
             propagate_mask: bool = True,
             equalize_additive: bool = False,
             equalize_order: int = 0,
@@ -738,7 +740,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
              for _i_ in range(n)],
             data_width, data_height, mode, percentile=percentile, scaling=scaling,
             scaling_percentile=scaling_percentile, prescaling=prescaling, prescaling_percentile=prescaling_percentile,
-            rejection=rejection, lo=lo, hi=hi, min_keep=min_keep, propagate_mask=propagate_mask,
+            rejection=rejection, lo=lo, hi=hi, nu=nu, min_keep=min_keep, propagate_mask=propagate_mask,
             equalize_additive=equalize_additive, equalize_order=equalize_order,
             equalize_multiplicative=equalize_multiplicative, multiplicative_percentile=multiplicative_percentile,
             equalize_global=equalize_global, max_mem_mb=max_mem_mb, callback=callback, progress=total_progress,
@@ -778,7 +780,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
                 new_res, new_rej_percent, _ = _do_combine(
                     new_input_data, data_width, data_height, mode, percentile=percentile, scaling=scaling,
                     scaling_percentile=scaling_percentile, prescaling=prescaling,
-                    prescaling_percentile=prescaling_percentile, rejection=None, lo=lo, hi=hi, min_keep=min_keep,
+                    prescaling_percentile=prescaling_percentile, rejection=None, lo=lo, hi=hi, nu=nu, min_keep=min_keep,
                     propagate_mask=propagate_mask, equalize_additive=False, equalize_multiplicative=False,
                     equalize_global=False, max_mem_mb=max_mem_mb, callback=callback, progress=total_progress,
                     progress_step=progress_step)
@@ -800,7 +802,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
                      for _i_ in range(len(final_data))], data_width, data_height,
                     mode, percentile=percentile, scaling=scaling, scaling_percentile=scaling_percentile,
                     prescaling=prescaling, prescaling_percentile=prescaling_percentile, rejection=rejection, lo=lo,
-                    hi=hi, min_keep=min_keep, propagate_mask=propagate_mask, equalize_additive=equalize_additive,
+                    hi=hi, nu=nu, min_keep=min_keep, propagate_mask=propagate_mask, equalize_additive=equalize_additive,
                     equalize_order=equalize_order, equalize_multiplicative=equalize_multiplicative,
                     multiplicative_percentile=multiplicative_percentile, equalize_global=equalize_global,
                     max_mem_mb=max_mem_mb, callback=callback, progress=total_progress, progress_step=progress_step)
@@ -891,6 +893,7 @@ def combine(input_data: list[pyfits.HDUList | tuple[np.ndarray | ma.MaskedArray,
         if rejection in ('chauvenet', 'rcr'):
             hdr['REJLOW'] = (bool(lo), 'Reject negative outliers')
             hdr['REJHIGH'] = (bool(hi), 'Reject positive outliers')
+            hdr['NUCOL'] = (bool(nu), 'Chauvenet Distribution')
         elif rejection == 'iraf':
             hdr['REJLOW'] = (int(lo), 'Number of low pixels rejected')
             hdr['REJHIGH'] = (int(hi), 'Number of high pixels rejected')
