@@ -106,3 +106,4 @@ MANIFEST
 
 # IntelliJ/PyCharm
 *.iml
+.idea/
