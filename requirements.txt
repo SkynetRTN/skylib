@@ -48,7 +48,6 @@ sgp4==2.25
 six==1.17.0
 skyfield==1.53
 soupsieve==2.6
-tbb==2021.10.0
 typing-extensions==4.13.1
 urllib3==2.3.0
 webencodings==0.5.1
