@@ -1,4 +1,5 @@
 
+import logging
 import os
 
 from scipy.interpolate import CubicHermiteSpline, CubicSpline
@@ -11,6 +12,9 @@ from skyfield.data.gravitational_parameters import GM_dict
 from skyfield.sgp4lib import EarthSatellite
 
 
+logger = logging.getLogger(__name__)
+
+
 __all__ = [
     'interpolate_ephem',
     'get_orbital_pos',
@@ -18,10 +22,47 @@ __all__ = [
     'get_planetary_satellite_pos',
     'get_norad_satellite_pos',
     'load_skyfield_data',
+    'ensure_jpl_ephemeris',
 ]
 
 
-solar_system_ephemeris.set('jpl')  # for Pluto support in Astropy
+def ensure_jpl_ephemeris() -> bool:
+    """Idempotently activate astropy's JPL solar-system ephemeris.
+
+    The JPL ephemeris is required for Pluto support in `astropy.get_body`
+    (and for `solar_system_ephemeris.bodies` to include Pluto). Activating
+    it triggers astropy to download the DE kernel (~33 MB) from
+    naif.jpl.nasa.gov on first use if it isn't already in the astropy
+    cache, which can fail on flaky egress.
+
+    Returns True if the JPL ephemeris is now active (or already was);
+    False if activation failed for any reason. Safe to call repeatedly —
+    astropy caches successful downloads, so subsequent calls are cheap.
+
+    Callers that genuinely need Pluto can invoke this at first use to
+    retry an import-time failure once the network is reachable.
+    """
+    try:
+        if solar_system_ephemeris.get() == 'jpl':
+            return True
+        solar_system_ephemeris.set('jpl')
+        return True
+    except Exception as exc:  # noqa: BLE001 — top-level best-effort
+        logger.warning(
+            "JPL solar-system ephemeris unavailable (%s: %s); "
+            "astropy will fall back to the built-in ephemeris (no Pluto support).",
+            type(exc).__name__,
+            exc,
+        )
+        return False
+
+
+# Try to activate the JPL ephemeris at import time so downstream
+# `astropy.get_body('pluto', ...)` calls work without an explicit setup
+# step. Wrapped in a best-effort helper so a network failure here never
+# takes down the importing process (this previously caused production
+# pods that import skylib to CrashLoopBackOff during JPL egress blips).
+ensure_jpl_ephemeris()
 
 skyfield_data_dir = os.environ.get('SKYFIELD_DATA', os.path.expanduser('~/.cache/skyfield'))
 load_skyfield_data = Loader(skyfield_data_dir, verbose=False)
