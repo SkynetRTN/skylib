@@ -160,12 +160,12 @@ def test_atlas_backend_samples() -> None:
         pytest.skip("UCAC5 root path not configured or missing")
 
     samples = _get_samples("atlas")
-    config = AtlasConfig(catalog="ucac5", catalog_roots={"ucac5": Path(ucac5_root)}, debug=True)
+    config = AtlasConfig(catalog="ucac5", catalog_roots={"ucac5": Path(ucac5_root)}, debug=True, max_catalog_stars=200)
     backend = AtlasBackend()
 
     for sample in samples:
         image_path = _sample_image_path(sample)
-        if "009" not in str(image_path):
+        if "010" not in str(image_path):
             continue
 
         wcs_path = _sample_wcs_path(sample)

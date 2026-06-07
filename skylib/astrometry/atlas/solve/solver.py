@@ -93,8 +93,8 @@ def solve(
         crop_fraction=1.0,
         downsample=1,
         edge_margin=8,
-        sn_thresh=5.0,
-        peak_sn_thresh=8.0,
+        sn_thresh=2.0,
+        peak_sn_thresh=2.0,
         min_area=5,
         max_elong=50.0,   # if you want to tolerate long trails
         debug_overlay_path=debug_overlay_path,

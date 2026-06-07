@@ -80,6 +80,16 @@
       "min_scale": 0.737513,
       "max_scale": 0.815146,
       "wcs": "009_wcs.fits"
+    },
+    
+    {
+      "image": "010.fits",
+      "ra_hours": 13.773,
+      "dec_degs":  -51.379,
+      "fov": 0.175,
+      "min_scale": 0.5,
+      "max_scale": 0.7,
+      "wcs": "010_wcs.fits"
     }
   ],
   "an": []
